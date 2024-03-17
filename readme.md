@@ -1,3 +1,5 @@
+Note: This project was forked from cavo789/vba_outlook_save_pdf. It just has some updated instructions and resolves an issue I was having with the VBA.
+
 # Enhanced Guide: Saving Selected Emails as PDFs in Outlook
 
 ![Enhanced Banner](./banner.svg)
