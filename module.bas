@@ -434,6 +434,7 @@ Sub SaveMails_ToPDF_Background()
     Dim wrd As Object, doc As Object
     Dim tmpFile As String, pdfFile As String, tgtFolder As String
     Dim fso As Object, hdr As String, logFilePath As String ' Added logFilePath
+    Dim attCnt As Long ' *** ADDED: For safe attachment count checking ***
 
     'Pick a target folder (no hard-coded C:\Mails)
     'NOTE: This will call your existing 'AskForTargetFolder' function
@@ -488,12 +489,17 @@ Sub SaveMails_ToPDF_Background()
                 GoTo NextItemInLoop
             End If
 
-            ' UPDATE (Instruction 4): Optional hard-skip for encrypted S/MIME mail.
-            ' This detects opaque S/MIME messages that arrive as a .p7m attachment and cannot be processed.
-            If mailItem.Attachments.Count = 1 _
-               And LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then
-                LogSkippedItem logFilePath, mailItem.Subject, "Item is an S/MIME encrypted message (.p7m attachment)"
-                GoTo NextItemInLoop
+            ' *** FIX: Harden S/MIME check to prevent "Array index out-of-bounds" error. ***
+            ' The 'And' operator in VBA is not short-circuited, so both conditions were
+            ' always evaluated, causing a crash if there were no attachments.
+            ' This nested check is safe.
+            attCnt = mailItem.Attachments.Count
+            If attCnt = 1 Then
+                If LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then
+                    LogSkippedItem logFilePath, mailItem.Subject, _
+                        "Item is an S/MIME encrypted message (.p7m attachment)"
+                    GoTo NextItemInLoop
+                End If
             End If
 
             ' --- END: UPDATES BASED ON YOUR INSTRUCTIONS ---
@@ -564,6 +570,17 @@ Sub SaveMails_ToPDF_Background()
             doc.Range.InsertBefore hdr
 
             '--- 4  export to PDF & clean up --------------------------
+
+            ' *** FIX: Ensure the target file is writable before exporting. ***
+            ' This prevents "file is read-only" errors by clearing the attribute
+            ' and deleting any existing locked file left from a previous failed run.
+            If fso.FileExists(pdfFile) Then
+                On Error Resume Next
+                SetAttr pdfFile, vbNormal      ' Clear read-only attribute
+                fso.DeleteFile pdfFile, True   ' Delete the file to ensure a clean save
+                On Error GoTo 0
+            End If
+
             ' *** UPDATE: Use explicit OptimizeFor:=0 parameter ***
             doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
             doc.Close False
