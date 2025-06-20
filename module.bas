@@ -405,6 +405,22 @@ Private Function CleanFile(s As String) As String
     CleanFile = Trim$(s)
 End Function
 
+' *** NEW FUNCTION: Logs skipped items to a text file for review. ***
+Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String, ByVal reason As String)
+    If Len(logPath) > 0 Then
+        Dim fileNum As Integer
+        fileNum = FreeFile
+        On Error Resume Next ' In case of file system errors (e.g., folder not accessible)
+        Open logPath For Append As #fileNum
+        If Err.Number = 0 Then
+            Print #fileNum, CStr(Now) & " | SKIPPED: """ & itemSubject & """ | Reason: " & reason
+            Close #fileNum
+        End If
+        On Error GoTo 0
+    End If
+End Sub
+
+
 'Save selected Outlook messages as PDFs – quiet & with headers
 Sub SaveMails_ToPDF_Background()
 
@@ -416,7 +432,7 @@ Sub SaveMails_ToPDF_Background()
     Dim mailItem As Outlook.MailItem ' Use a specific variable after type check
     Dim wrd As Object, doc As Object
     Dim tmpFile As String, pdfFile As String, tgtFolder As String
-    Dim fso As Object, hdr As String
+    Dim fso As Object, hdr As String, logFilePath As String ' Added logFilePath
 
     'Pick a target folder (no hard-coded C:\Mails)
     'NOTE: This will call your existing 'AskForTargetFolder' function
@@ -430,6 +446,9 @@ Sub SaveMails_ToPDF_Background()
         wrd.Quit
         Exit Sub
     End If
+
+    ' *** UPDATE: Define the path for the log file ***
+    logFilePath = tgtFolder & "_SkippedItems.log"
 
     wrd.DisplayAlerts = 0             'wdAlertsNone
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -448,9 +467,18 @@ Sub SaveMails_ToPDF_Background()
             Set mailItem = mi
 
             ' --- UPDATE 2.1 & 2.3: Additional guards for item validity ---
-            If mailItem.Class <> olMail Then GoTo NextItemInLoop   'reports, tasks, etc.
-            If mailItem.Size = 0 Then GoTo NextItemInLoop         'header only / not synced
-            If mailItem.IsRestricted Then GoTo NextItemInLoop     'M365 “Record” label or RMS-protected
+            If mailItem.Class <> olMail Then
+                LogSkippedItem logFilePath, mailItem.Subject, "Not a true MailItem (e.g., Report, Meeting Invite)"
+                GoTo NextItemInLoop
+            End If
+            If mailItem.Size = 0 Then
+                LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0 (header only, not downloaded)"
+                GoTo NextItemInLoop
+            End If
+            If mailItem.IsRestricted Then
+                LogSkippedItem logFilePath, mailItem.Subject, "Item is restricted (M365 Record/RMS Protected)"
+                GoTo NextItemInLoop
+            End If
 
             '--- 1  FIX A: Harden the filename builder to prevent MAX_PATH errors ---
             Const MAX_PATH As Long = 260
@@ -488,6 +516,9 @@ Sub SaveMails_ToPDF_Background()
                 ' Clear the error and attempt the fallback action.
                 Err.Clear
 
+                ' *** UPDATE: Log the failure before attempting fallback ***
+                LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHTML, attempting MSG fallback"
+
                 ' Fallback: Save the item as a .MSG file in the target folder instead.
                 Dim msgFallbackFile As String
                 msgFallbackFile = Replace(pdfFile, ".pdf", ".msg")
@@ -514,7 +545,8 @@ Sub SaveMails_ToPDF_Background()
             doc.Range.InsertBefore hdr
 
             '--- 4  export to PDF & clean up --------------------------
-            doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+            ' *** UPDATE: Use explicit OptimizeFor:=0 parameter ***
+            doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
             doc.Close False
             fso.DeleteFile tmpFile
 
@@ -523,6 +555,11 @@ Sub SaveMails_ToPDF_Background()
                 Application.StatusBar = "Saving mail " & done & " of " & total & "..."
                 If done Mod 25 = 0 Then DoEvents
             End If
+        Else ' Item in selection is not a MailItem
+             ' *** UPDATE: Log non-mail items that are skipped ***
+             Dim itemType As String
+             itemType = TypeName(mi)
+             LogSkippedItem logFilePath, "Unknown Subject (Type: " & itemType & ")", "Item is not an email (e.g., a " & itemType & ")"
         End If ' End of "If TypeOf mi Is Outlook.MailItem" check
 
 NextItemInLoop:
@@ -535,6 +572,7 @@ NextItemInLoop:
 
     If showProgress Then Application.StatusBar = False
     wrd.Quit
-    MsgBox done & " mail(s) saved as PDF to " & tgtFolder, vbInformation
+    MsgBox done & " mail(s) saved as PDF to " & tgtFolder & vbCrLf & vbCrLf & _
+           "A log of any skipped items has been saved to _SkippedItems.log", vbInformation
 
 End Sub
