@@ -255,9 +255,6 @@ Sub SaveAsPDFfile()
             ' Construct the filename for the temp mht-file
             sTempFileName = sTempFolder & "\outlook.mht"
 
-            ' Kill the previous file if already present
-            If Len(Dir$(sTempFileName)) > 0 Then Kill sTempFileName
-
             ' Save the mht-file
             oMail.SaveAs sTempFileName, olMHTML
 
@@ -296,6 +293,21 @@ Sub SaveAsPDFfile()
                 ' And close once saved on disk
                 objDoc.Close (False)
 
+                ' Release the document object
+                Set objDoc = Nothing
+
+                '--- ensure temporary file can be deleted --------------------
+                Dim attempt As Integer
+                For attempt = 1 To 3
+                    If Len(Dir$(sTempFileName, vbNormal)) = 0 Then Exit For
+                    On Error Resume Next
+                    SetAttr sTempFileName, vbNormal
+                    Kill sTempFileName
+                    On Error GoTo 0
+                    If Len(Dir$(sTempFileName, vbNormal)) = 0 Then Exit For
+                    DoEvents
+                Next attempt
+
             End If
 
         End If
@@ -311,6 +323,14 @@ Sub SaveAsPDFfile()
     On Error Resume Next
     objWord.Quit
     On Error GoTo 0
+
+    '--- delete any remaining temporary file -----------------------
+    If Len(Dir$(sTempFileName, vbNormal)) > 0 Then
+        On Error Resume Next
+        SetAttr sTempFileName, vbNormal
+        Kill sTempFileName
+        On Error GoTo 0
+    End If
 
     ' Cleanup
 
