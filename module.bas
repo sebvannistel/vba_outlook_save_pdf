@@ -43,6 +43,11 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
         .InitialFileName = sTargetFolder
+        
+        ' --- START: USER-REQUESTED UPDATE 1 ---
+        SetForegroundWindow objWord.Hwnd      'add this
+        ' --- END: USER-REQUESTED UPDATE 1 ---
+        
         .Show
 
         On Error Resume Next
@@ -552,6 +557,14 @@ Sub SaveMails_ToPDF_Background()
                 Dim msgFallbackFile As String
                 ' UPDATE 4: Reuse the truncation helper for the “.msg” fallback path
                 msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
+                
+                ' --- START: USER-REQUESTED UPDATE 2 ---
+                If fso.FileExists(msgFallbackFile) Then
+                    SetAttr msgFallbackFile, vbNormal    'clear R/O
+                    fso.DeleteFile msgFallbackFile, True
+                End If
+                ' --- END: USER-REQUESTED UPDATE 2 ---
+
                 ' UPDATE 3: Prefer the real constant over the magic number
                 mailItem.SaveAs msgFallbackFile, 9   'olMSGUnicode
 
