@@ -586,10 +586,27 @@ Sub SaveAsPDFfile()
     Set fso = CreateObject("Scripting.FileSystemObject")
     logFilePath = tgtFolder & "_SkippedItems_" & Format(Now, "yyyymmdd_hhnnss") & ".log"
 
+    ' --- DETAILED DIAGNOSTIC FOR WORD OBJECT CREATION ---
+    Dim failedStep As String
+
+    On Error Resume Next ' Temporarily disable the main error handler
+
+    failedStep = "CreateObject(""Word.Application"")"
     Set wrd = CreateObject("Word.Application")
+    If Err.Number <> 0 Then GoTo WordCreationFailed
+
+    failedStep = "wrd.Visible = False"
     wrd.Visible = False
+    If Err.Number <> 0 Then GoTo WordCreationFailed
+
+    failedStep = "wrd.DisplayAlerts = 0"
     wrd.DisplayAlerts = 0
+    If Err.Number <> 0 Then GoTo WordCreationFailed
+
+    On Error GoTo ErrorHandler ' Restore the main error handler
+
     Set objWord = wrd
+    ' --- END OF DIAGNOSTIC BLOCK ---
 
     '================================================================================
     '--- MAIN EXPORT LOOP ---
@@ -718,6 +735,13 @@ Cleanup:
     Set wrd = Nothing: Set fso = Nothing: Set sel = Nothing
     Set doc = Nothing: Set mailItem = Nothing: Set objWord = Nothing
     Exit Sub
+
+WordCreationFailed:
+    MsgBox "The macro failed to initialize Microsoft Word." & vbCrLf & vbCrLf & _
+           "Failing step: " & failedStep & vbCrLf & _
+           "Error: " & Err.Description & vbCrLf & vbCrLf & _
+           "This usually indicates a problem with the Office installation or registry.", vbCritical, "Word Initialization Failed"
+    GoTo Cleanup
 
 ErrorHandler:
     MsgBox "A critical error occurred on line " & Erl & "." & vbCrLf & vbCrLf & _
