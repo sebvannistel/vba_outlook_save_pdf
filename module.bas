@@ -31,87 +31,38 @@ Private Const wdOpenFormatWebPages As Long = 7
 Private objWord As Object
 
 ' =========================================================================================
-' === STABILITY FIX: Use Outlook's native File Dialog instead of Word's.             ===
-' === This avoids cross-application UI issues and the need for API calls.             ===
+' === UNIVERSAL FOLDER PICKER (Fallback for when FileDialog fails)                      ===
 ' =========================================================================================
-Private Function AskForTargetFolder(ByVal sInitialFolder As String) As String
-    Dim dlg As FileDialog
-    Dim selectedFolder As String
-
-    ' Use Outlook's Application.FileDialog - it's 100% stable
-    Set dlg = Application.FileDialog(msoFileDialogFolderPicker)
-
-    With dlg
-        .Title = "Select a Folder where to save emails"
-        .AllowMultiSelect = False
-        If Len(sInitialFolder) > 0 Then
-            .InitialFileName = sInitialFolder
+Private Function GetTargetFolder_Universal() As String
+    Dim shellApp As Object
+    Dim folder As Object
+    Dim folderPath As String
+    
+    On Error Resume Next
+    Set shellApp = CreateObject("Shell.Application")
+    If shellApp Is Nothing Then
+        GetTargetFolder_Universal = InputBox("Could not create the Shell object. Please enter the full folder path:", "Enter Folder Path")
+        Exit Function
+    End If
+    
+    ' BIF_RETURNONLYFSDIRS (1) + BIF_NEWDIALOGSTYLE (64)
+    Set folder = shellApp.BrowseForFolder(0, "Please select a folder to save the PDFs", 1 + 64)
+    
+    If Not folder Is Nothing Then
+        folderPath = folder.Self.Path
+        ' Ensure the path ends with a backslash
+        If Right(folderPath, 1) <> "\" Then
+            folderPath = folderPath & "\"
         End If
-
-        ' Show the dialog. If the user clicks OK, .Show returns -1
-        If .Show = -1 Then
-            selectedFolder = .SelectedItems(1)
-            ' Ensure the path ends with a backslash
-            If Right(selectedFolder, 1) <> "\" Then
-                selectedFolder = selectedFolder & "\"
-            End If
-        Else
-            ' User cancelled
-            selectedFolder = ""
-        End If
-    End With
-
-    AskForTargetFolder = selectedFolder
-    Set dlg = Nothing
+    End If
+    
+    GetTargetFolder_Universal = folderPath
+    
+    Set folder = Nothing
+    Set shellApp = Nothing
+    On Error GoTo 0
 End Function
 
-
-' --------------------------------------------------
-'
-' Ask the user for a filename
-' (CRITICAL RISK FIX: Re-written to be stable)
-'
-' --------------------------------------------------
-Private Function AskForFileName(ByVal sFileName As String) As String
-    ' STABILITY FIX: This function has been re-written to use Outlook's native
-    ' Application.FileDialog. This is 100% stable and avoids using Word's UI
-    ' and the fragile SetForegroundWindow API call that caused crashes.
-
-    Dim dlg As FileDialog
-    Dim sSelectedFile As String
-
-    ' Use Outlook's Application.FileDialog for stability
-    Set dlg = Application.FileDialog(msoFileDialogSaveAs)
-
-    With dlg
-        .Title = "Save As PDF"
-        .InitialFileName = sFileName ' Use the suggested filename
-
-        ' Clear existing filters and add a specific PDF filter
-        .Filters.Clear
-        .Filters.Add "PDF Files", "*.pdf"
-        .FilterIndex = 1 ' Make PDF the default and only option
-
-        ' Show the dialog. If the user clicks Save, .Show returns -1
-        If .Show = -1 Then
-            sSelectedFile = .SelectedItems(1)
-
-            ' The SaveAs dialog usually appends the extension automatically if the
-            ' filter is set, but we can double-check to be certain.
-            If LCase(Right(sSelectedFile, 4)) <> ".pdf" Then
-                sSelectedFile = sSelectedFile & ".pdf"
-            End If
-        Else
-            ' User cancelled the dialog
-            sSelectedFile = ""
-        End If
-    End With
-
-    ' Return the selected filename or an empty string if cancelled
-    AskForFileName = sSelectedFile
-
-    Set dlg = Nothing
-End Function
 
 ' --------------------------------------------------
 '
@@ -560,7 +511,7 @@ Sub SaveAsPDFfile()
     On Error GoTo ErrorHandler
 
     ' Step 1: Get target folder
-    tgtFolder = AskForTargetFolder("C:\Temp")
+    tgtFolder = GetTargetFolder_Universal()
     If Len(tgtFolder) = 0 Then Exit Sub
 
     ' Step 2: Get selections
