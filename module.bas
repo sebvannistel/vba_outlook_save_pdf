@@ -551,24 +551,22 @@ Sub SaveAsPDFfile()
     
     Dim k As String, it As Object
 
+    ' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    ' >>> START OF APPLIED FIX (as per your request, using Fix Option #2)
+    '
+    ' The original code used ConversationID, which collapsed threads. This new
+    ' code uses EntryID to ensure every unique selected item is processed.
+    '
     For Each it In sel
-        If IsSpecial(it) Then                       'NDR, report, etc.
-            k = it.EntryID
-        Else                                        'regular mail
-            On Error Resume Next
-            k = it.ConversationID
-            If Err.Number <> 0 Or k = "" Then k = it.ConversationTopic
-            On Error GoTo 0
-            ' *** UPDATE #4: Add a final fallback to guarantee a key for every message ***
-            If k = "" Then k = it.EntryID    ' last-resort unique key
-        End If
-
+        k = it.EntryID                 ' <- unique key per message
         If Not latest.Exists(k) Then
-            Set latest(k) = it
-        ElseIf ItemDate(it) > ItemDate(latest(k)) Then
-            Set latest(k) = it                     'replace by newer
+            latest.Add k, it
         End If
     Next it
+    '
+    ' >>> END OF APPLIED FIX
+    ' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
     '-----------------------------------------------------------------
 
     total = latest.Count ' Use the count of the filtered list
