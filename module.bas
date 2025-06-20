@@ -1,3 +1,11 @@
+#If VBA7 Then
+Private Declare PtrSafe Function SetForegroundWindow Lib "user32" _
+        (ByVal hWnd As LongPtr) As LongPtr
+#Else
+Private Declare Function SetForegroundWindow Lib "user32" _
+        (ByVal hWnd As Long) As Long
+#End If
+
 ' --------------------------------------------------
 '
 ' Outlook macro to save a selected item(s) as pdf
@@ -43,6 +51,10 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
         .InitialFileName = sTargetFolder
+        
+        ' *** UPDATE: Make the folder dialog stay on top ***
+        SetForegroundWindow objWord.Hwnd
+        
         .Show
 
         On Error Resume Next
@@ -544,10 +556,18 @@ Sub SaveMails_ToPDF_Background()
                 ' *** UPDATE: Log the failure before attempting fallback ***
                 LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHTML, attempting MSG fallback"
 
-                ' Fallback: Save the item as a .MSG file in the target folder instead.
+                ' *** UPDATE: Stop read-only errors on fallback save ***
                 Dim msgFallbackFile As String
                 msgFallbackFile = Replace(pdfFile, ".pdf", ".msg")
-                mailItem.SaveAs msgFallbackFile, olMSG
+                
+                If fso.FileExists(msgFallbackFile) Then
+                    On Error Resume Next
+                    SetAttr msgFallbackFile, vbNormal    'clear RO flag
+                    fso.DeleteFile msgFallbackFile, True 'hard delete
+                    On Error GoTo 0
+                End If
+                
+                mailItem.SaveAs msgFallbackFile, 65      '65 = olMSGUnicode, safer for accents (as per update request)
 
                 ' Since MHTML creation failed, we cannot create a PDF. Skip to the next item.
                 GoTo NextItemInLoop
@@ -559,15 +579,17 @@ Sub SaveMails_ToPDF_Background()
             '--- 3  open in Word and prepend header -------------------
             Set doc = wrd.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
 
-            hdr = "From:    " & mailItem.SenderName & vbCrLf & _
-                  "Sent:    " & mailItem.SentOn & vbCrLf & _
-                  "To:      " & mailItem.To & vbCrLf & _
-                  "CC:      " & mailItem.CC & vbCrLf & _
-                  "BCC:     " & mailItem.BCC & vbCrLf & _
-                  "Subject: " & mailItem.Subject & vbCrLf & _
-                  String(60, "—") & vbCrLf & vbCrLf
-
-            doc.Range.InsertBefore hdr
+            ' *** UPDATE: Avoid inserting a double header ***
+            If Not Left$(doc.Range(0, 6).Text, 5) = "From:" Then
+                hdr = "From:    " & mailItem.SenderName & vbCrLf & _
+                      "Sent:    " & mailItem.SentOn & vbCrLf & _
+                      "To:      " & mailItem.To & vbCrLf & _
+                      "CC:      " & mailItem.CC & vbCrLf & _
+                      "BCC:     " & mailItem.BCC & vbCrLf & _
+                      "Subject: " & mailItem.Subject & vbCrLf & _
+                      String(60, "—") & vbCrLf & vbCrLf
+                doc.Range.InsertBefore hdr
+            End If
 
             '--- 4  export to PDF & clean up --------------------------
 
