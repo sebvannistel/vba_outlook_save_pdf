@@ -127,7 +127,7 @@ Sub SaveAsPDFfile()
     Const ATTR_ALL = vbNormal + vbReadOnly + vbHidden + vbSystem
 
     Dim oSelection As Outlook.Selection
-    Dim oMail As Outlook.MailItem
+    Dim oMail As Object
 
     ' Use late-bindings
     Dim objDoc As Object
@@ -242,30 +242,43 @@ Sub SaveAsPDFfile()
 
     ' ----------------------------------------------------
     ' We are ready to start
-    ' Pass 1 – build a map of the latest message per topic
+    Dim oItem As Object, k As String
 
-    Dim key As String
-    For I = 1 To wSelectedeMails
-
-        Set oMail = oSelection.Item(I)
-
-        If IsSpecial(oMail) Then
-            key = oMail.EntryID                'always its own PDF
+    ' Pass 1 – remember only the most recent item per conversation
+    For Each oItem In oSelection
+        'determine the de-duplication key
+        If IsSpecial(oItem) Then
+            k = oItem.EntryID
         Else
-            key = oMail.ConversationTopic      'normal dedup
+            On Error Resume Next
+            k = oItem.ConversationID
+            If Err.Number <> 0 Or k = "" Then k = oItem.ConversationTopic
+            On Error GoTo 0
         End If
 
-        If Not latest.Exists(key) Then
-            Set latest(key) = oMail
-        ElseIf oMail.ReceivedTime > latest(key).ReceivedTime Then
-            Set latest(key) = oMail
+        'keep only the newest item for this key
+        If Not latest.Exists(k) Then
+            Set latest(k) = oItem
+        ElseIf ItemDate(oItem) > ItemDate(latest(k)) Then
+            Set latest(k) = oItem
         End If
-    Next I
+    Next
 
-    ' Pass 2 – export the kept messages only
-    Dim itm As Variant
-    For Each itm In latest.Items
-        Set oMail = itm
+    '----------- sort the kept items newest-first -----------------
+    Dim keys() As Variant, i As Long, j As Long, tmp As Variant
+    keys = latest.Keys
+    For i = LBound(keys) To UBound(keys) - 1
+        For j = i + 1 To UBound(keys)
+            If ItemDate(latest(keys(j))) > ItemDate(latest(keys(i))) Then
+                tmp = keys(i): keys(i) = keys(j): keys(j) = tmp
+            End If
+        Next j
+    Next i
+
+    '----------- export -------------------------------------------
+    Dim kKey
+    For Each kKey In keys
+        Set oMail = latest(kKey)
 
             ' Construct a unique filename for the temp mht-file
             sTempFileName = sTempFolder & "\" & Replace(objFSO.GetTempName, ".tmp", ".mht")
@@ -287,7 +300,7 @@ Sub SaveAsPDFfile()
             Dim base As String, try As String, dup As Long, room As Long
 
             base = sTargetFolder & _
-                   Format(oMail.ReceivedTime, "yyyy-mm-dd_hh-nn-ss") & "_" & _
+                   Format(ItemDate(oMail), "yyyy-mm-dd_hh-nn-ss") & "_" & _
                    CleanSubject(oMail.Subject)
 
             room = MAX_PATH - Len(sTargetFolder) - 5          '-5 for ".pdf"
@@ -340,7 +353,7 @@ Sub SaveAsPDFfile()
 
             End If
 
-    Next itm
+    Next kKey
 
     Set dlgSaveAs = Nothing
 
@@ -401,24 +414,43 @@ Private Function CleanSubject(raw As String) As String
     CleanSubject = Trim$(reBad.Replace(rePfx.Replace(CStr(raw), ""), ""))
 End Function
 
+'========== 1) universal time getter ==========
+Private Function ItemDate(itm As Object) As Date
+    Select Case True
+        Case TypeOf itm Is Outlook.MailItem
+            If itm.ReceivedTime = #1/1/4501# Then
+                ItemDate = itm.SentOn
+            Else
+                ItemDate = itm.ReceivedTime
+            End If
+        Case TypeOf itm Is Outlook.ReportItem
+            ItemDate = itm.CreationTime
+        Case Else
+            ItemDate = Now
+    End Select
+End Function
+
 '--------------------------------------------------
 ' Determine whether an email should be treated as a
 ' "special" item that always gets its own PDF, even
 ' when other mails share the same conversation topic.
 '--------------------------------------------------
-Private Function IsSpecial(oMail As Outlook.MailItem) As Boolean
-    Dim cls As String
-    cls = oMail.MessageClass
+Private Function IsSpecial(itm As Object) As Boolean
+    Dim cls As String: cls = itm.MessageClass
 
-    If cls Like "IPM.Outlook.Recall*" _
-       Or cls Like "IPM.Recall.Report*" _
-       Or cls Like "REPORT.IPM.NOTE.*" _
-       Or cls Like "REPORT.IPM.SCHEDULE.*" _
-       Or cls Like "IPM.Schedule.Meeting.*" _
-       Or cls Like "IPM.Note.Rules.OofTemplate*" _
-       Or cls Like "IPM.TaskRequest.*" Then
-        IsSpecial = True
-    ElseIf InStr(1, oMail.Subject, "Automatic reply:", vbTextCompare) > 0 Then
-        IsSpecial = True
-    End If
+    Select Case True
+        Case cls Like "IPM.Outlook.Recall*"
+        Case cls Like "IPM.Recall.Report*"
+        Case cls Like "REPORT.IPM.*"
+        Case cls Like "IPM.Schedule.Meeting.*"
+        Case cls Like "IPM.Note.Rules.OofTemplate*"
+        Case cls Like "IPM.Note.Rules.ExternalOofTemplate*"
+        Case cls Like "IPM.TaskRequest.*"
+        Case InStr(1, itm.Subject, "Automatic reply:", vbTextCompare) > 0
+        Case Else: GoTo NotSpecial
+    End Select
+    IsSpecial = True
+    Exit Function
+NotSpecial:
+    IsSpecial = False
 End Function
