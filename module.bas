@@ -30,6 +30,7 @@ Private Const wdExportFormatPDF As Long = 17     'moved to module level
 Private Const olMHTML As Long = 10               'Added for late-binding
 Private Const olMSG As Long = 3                  'Added for late-binding
 Private Const olUnrestricted As Long = 0         'NEW: For version-independent IRM/RMS check
+Private Const wdOpenFormatWebPages As Long = 7
 
 Private objWord As Object
 
@@ -629,7 +630,33 @@ Sub SaveMails_ToPDF_Background()
 
 
             '--- 3  open in Word and prepend header -------------------
-            Set doc = wrd.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
+            'NEW: make the open bullet-proof
+            Dim tryAgain As Boolean
+            Do
+                On Error Resume Next
+                Set doc = wrd.Documents.Open( _
+                            FileName:=tmpFile, _
+                            ConfirmConversions:=False, _
+                            ReadOnly:=True, _
+                            Visible:=False, _
+                            Format:=wdOpenFormatWebPages)   'force the right converter
+                If Err.Number = 4198 Then
+                    Err.Clear
+                    If Len(tmpFile) > 250 Then _
+                        tmpFile = Left$(tmpFile, 250) & ".mht"  'shrink over-long paths
+                    Sleep 200                                   'let Windows finish I/O
+                    tryAgain = Not tryAgain                     'only try twice
+                Else
+                    tryAgain = False
+                End If
+                On Error GoTo 0
+            Loop While tryAgain
+
+            If doc Is Nothing Then
+                LogSkippedItem logFilePath, mailItem.Subject, _
+                  "Word could not open MHT – most likely long path or bad converter"
+                GoTo NextItemInLoop
+            End If
 
             hdr = "From:    " & mailItem.SenderName & vbCrLf & _
                   "Sent:    " & mailItem.SentOn & vbCrLf & _
