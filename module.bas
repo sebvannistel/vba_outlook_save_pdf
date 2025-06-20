@@ -690,11 +690,20 @@ NextItem:
     MsgBox msg, vbInformation, "Export Complete"
 
 Cleanup:
-    ' -- Safely reset status bars in Word and Outlook
+    ' -- Safely reset status bars in Word and Outlook --
     On Error Resume Next
-    wrd.StatusBar = False                       ' Word
-    Application.ActiveExplorer.StatusBar = ""   ' Outlook
-    On Error GoTo 0
+
+    ' *** THE FIX: Only interact with the 'wrd' object IF it has been created ***
+    If Not wrd Is Nothing Then
+        wrd.StatusBar = False ' Clears Word's status bar
+    End If
+
+    ' Safely clear Outlook's status bar
+    If Not Application.ActiveExplorer Is Nothing Then
+        Application.ActiveExplorer.StatusBar = ""
+    End If
+
+    On Error GoTo 0 ' Resume normal error handling
 
     On Error Resume Next
     If Not wrd Is Nothing Then wrd.Quit
