@@ -618,23 +618,35 @@ Sub SaveMails_ToPDF_Background()
         Exit Sub
     End If
 
-    On Error Resume Next
+    ' --- START: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP ---
     For Each itm In sel
-        If TypeOf itm Is Outlook.mailItem Then
+        If TypeOf itm Is Outlook.MailItem Then
+            ' Attempt to get the ConversationID. Some items might not have one.
+            On Error Resume Next
             key = itm.ConversationID
-            If Err.Number = 0 And Len(key) > 0 Then
-                If Not convDict.Exists(key) Then
-                    Set convDict(key) = itm
-                ElseIf convDict(key).ReceivedTime > 0 And itm.ReceivedTime > convDict(key).ReceivedTime Then ' <-- PATCH 3: APPLIED
-                    Set convDict(key) = itm
-                End If
-            Else
+            If Err.Number <> 0 Or Len(key) = 0 Then
+                ' Fallback to a unique key if ConversationID is not available
                 Err.Clear
-                Set convDict(itm.EntryID) = itm ' Corrected: Added 'Set'
+                key = itm.EntryID
+            End If
+            On Error GoTo 0
+
+            ' Now, correctly add or update the dictionary entry for this key.
+            ' This prevents adding Nothing/null values that cause error 424 later.
+            If Not convDict.Exists(key) Then
+                ' This is a new key, so use the Add method.
+                convDict.Add key, itm
+            Else
+                ' The key already exists; check if this email is newer.
+                If itm.ReceivedTime > convDict(key).ReceivedTime Then
+                    ' This email is newer, so update the value for the existing key.
+                    ' Note: We do not use 'Set' here.
+                    convDict(key) = itm
+                End If
             End If
         End If
     Next itm
-    On Error GoTo 0
+    ' --- END: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP ---
     
     total = convDict.Count
     showProgress = (total > 1)
