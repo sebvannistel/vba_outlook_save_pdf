@@ -357,3 +357,60 @@ Function StripQuotedBody(mi As Outlook.MailItem) As String
     If pos > 0 Then html = Left$(html, pos - 1) & "</body></html>"
     StripQuotedBody = html
 End Function
+
+' --------------------------------------------------
+' Export selected mails as PDFs entirely in the background
+' No Inspector windows will open and the original message
+' remains untouched.
+Sub SaveSelectedMails_AsPDF_NoPopups()
+
+    Const wdExportFormatPDF = 17
+    Const tempExtMHT = ".mht"
+
+    Dim sel As Outlook.Selection
+    Dim mi As Outlook.MailItem
+    Dim objWord As Object, doc As Object
+    Dim tmpFile As String, pdfFile As String
+    Dim fso As Object
+
+    Set sel = Application.ActiveExplorer.Selection
+    If sel.Count = 0 Then
+        MsgBox "Nothing selected"
+        Exit Sub
+    End If
+
+    Set objWord = CreateObject("Word.Application")
+    objWord.Visible = False
+    Set fso = CreateObject("Scripting.FileSystemObject")
+
+    For Each mi In sel
+
+        '1. build filenames
+        tmpFile = Environ$("TEMP") & "\" & _
+                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & "_" & _
+                  CleanFile(mi.Subject) & tempExtMHT
+
+        pdfFile = cFolder & _
+                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & " – " & _
+                  CleanFile(mi.Subject) & ".pdf"
+
+        '2. save e-mail as an MHT without opening an Inspector
+        mi.SaveAs tmpFile, olMHTML
+
+        '3. let Word convert that file straight to PDF
+        Set doc = objWord.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
+        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+        doc.Close False
+
+        fso.DeleteFile tmpFile
+
+    Next mi
+
+    objWord.Quit
+    MsgBox sel.Count & " mail(s) exported."
+End Sub
+
+Private Function CleanFile(s As String) As String
+    s = Replace(s, ":", " ")
+    CleanFile = Trim$(s)
+End Function
