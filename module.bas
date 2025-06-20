@@ -540,11 +540,12 @@ Sub SaveAsPDFfile()
     ' FIX #1: Pick only the latest item before you open Word
     '-----------------------------------------------------------------
     ' PASS 1 – keep just the newest item per conversation
-    Dim latest As Object: Set latest = CreateObject("Scripting.Dictionary")
+    Dim latest As Object
+    Set latest = CreateObject("Scripting.Dictionary")
     
-    ' *** UPDATE: Guard against COM failure to create the dictionary ***
-    If latest Is Nothing Then          '— bail out if COM failed —
-        MsgBox "Could not create Scripting.Dictionary – is scrrun.dll registered?", vbCritical
+    ' *** UPDATE #1: Add a creation guard immediately after you build the dictionary ***
+    If latest Is Nothing Then                     ' -- COM failed (scrrun.dll not registered)
+        MsgBox "Could not create Scripting.Dictionary – check scrrun.dll registration.", vbCritical
         Exit Sub
     End If
     
@@ -558,6 +559,8 @@ Sub SaveAsPDFfile()
             k = it.ConversationID
             If Err.Number <> 0 Or k = "" Then k = it.ConversationTopic
             On Error GoTo 0
+            ' *** UPDATE #4: Add a final fallback to guarantee a key for every message ***
+            If k = "" Then k = it.EntryID    ' last-resort unique key
         End If
 
         If Not latest.Exists(k) Then
@@ -609,13 +612,14 @@ Sub SaveAsPDFfile()
         On Error GoTo 0
     End If
 
-    ' *** UPDATE: Guard against the 'latest' variable being overwritten before the loop ***
+    ' *** UPDATE #2: Add a type-safety guard *right before* the For Each loop ***
+    '— sanity check: has <latest> been clobbered in the meantime? —
     If Not (TypeName(latest) = "Dictionary") Then
-        MsgBox "Internal error – variable <latest> is no longer a dictionary.", vbCritical
+        MsgBox "Internal error – variable <latest> is no longer a Dictionary.", vbCritical
         Exit Sub
     End If
 
-    ' FIX #1: Iterate over the filtered dictionary items, not the original selection
+    ' Iterate over the filtered dictionary items, not the original selection
     For Each item In latest.Items
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
@@ -671,7 +675,8 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
         
-1000: Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+        ' *** UPDATE #3: Add colons to numeric labels ***
+1000:   Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
         If Err.Number <> 0 Then
              Err.Clear
              LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
@@ -679,9 +684,9 @@ Sub SaveAsPDFfile()
              GoTo NextItem
         End If
 
-1010: Call InjectFullHeader(doc, mailItem)
-1020: Call TrimQuotedContent(doc)
-1030: doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+1010:   Call InjectFullHeader(doc, mailItem)
+1020:   Call TrimQuotedContent(doc)
+1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
