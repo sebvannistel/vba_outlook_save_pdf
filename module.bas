@@ -571,7 +571,6 @@ Sub SaveMails_ToPDF_Background()
     
     tgtFolder = AskForTargetFolder("")
     
-    ' FIX: Add guard for long target paths (Your suggestion)
     If Len(tgtFolder) > 220 Then
         MsgBox "The selected folder path is too long. Please choose a shorter path to avoid errors.", vbExclamation, "Path Too Long"
         wrd.Quit
@@ -591,122 +590,128 @@ Sub SaveMails_ToPDF_Background()
     Set fso = CreateObject("Scripting.FileSystemObject")
 
     '================================================================================
-    '--- LAYER 1: PRE-FILTER SELECTION (with backward-compatibility fix) ---
+    '--- LAYER 1: PRE-FILTER SELECTION (FIX #1: Verify Dictionary Creation) ---
     '================================================================================
-    Dim convDict As Object: Set convDict = CreateObject("Scripting.Dictionary")
+    Dim convDict As Object
     Dim itm As Object, key As String
 
-    ' FIX: Add error handling for older Outlook versions without ConversationID
+    On Error Resume Next
+    Set convDict = CreateObject("Scripting.Dictionary")
+    On Error GoTo 0
+    
+    If convDict Is Nothing Then
+        MsgBox "Critical Error: Could not create the 'Scripting.Dictionary' object." & vbCrLf & _
+               "This may be due to a missing or corrupted system library (scrrun.dll).", vbCritical
+        wrd.Quit
+        Set wrd = Nothing: Set objWord = Nothing
+        Exit Sub
+    End If
+
     On Error Resume Next
     For Each itm In sel
         If TypeOf itm Is Outlook.MailItem Then
             key = itm.ConversationID
-            If Err.Number = 0 And Len(key) > 0 Then ' Process only if ConversationID was accessed successfully
+            If Err.Number = 0 And Len(key) > 0 Then
                 If Not convDict.Exists(key) Then
                     Set convDict(key) = itm
                 ElseIf itm.ReceivedTime > convDict(key).ReceivedTime Then
                     Set convDict(key) = itm
                 End If
             Else
-                ' Fallback for old Outlook: use EntryID to avoid crashing, though it won't de-duplicate threads.
                 Err.Clear
-                convDict(itm.EntryID) = itm
+                Set convDict(itm.EntryID) = itm ' Corrected: Added 'Set'
             End If
         End If
     Next itm
     On Error GoTo 0
     
-    ' --- STATUS BAR SETUP ---
     total = convDict.Count
     showProgress = (total > 1)
-    ' FIX: Target Word's status bar, not Outlook's (Your suggestion)
     If showProgress Then wrd.StatusBar = "Preparing to save " & total & " top-level mail(s)..."
 
     '================================================================================
-    '--- MAIN EXPORT LOOP (Iterates over the filtered dictionary) ---
+    '--- MAIN EXPORT LOOP (FIX #2: Use a safe Variant loop) ---
     '================================================================================
-    Dim mi As Object, mailItem As Outlook.MailItem
+    Dim miAsVariant As Variant
+    Dim mailItem As Outlook.MailItem
     
-    For Each mi In convDict.Items
-        Set mailItem = mi
-        
-        ' --- Safety checks ---
-        If mailItem.Class <> olMail Then LogSkippedItem logFilePath, mailItem.Subject, "Not a true MailItem": GoTo NextItemInLoop
-        If mailItem.Size = 0 Then LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0": GoTo NextItemInLoop
-        If mailItem.Permission <> olUnrestricted Then LogSkippedItem logFilePath, mailItem.Subject, "Item is IRM Protected": GoTo NextItemInLoop
-        If mailItem.Attachments.Count = 1 And LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then LogSkippedItem logFilePath, mailItem.Subject, "S/MIME Encrypted": GoTo NextItemInLoop
+    For Each miAsVariant In convDict.Items
+        ' Check if the item from the dictionary is a valid MailItem object
+        If TypeOf miAsVariant Is Outlook.MailItem Then
+            Set mailItem = miAsVariant ' Safe to assign now
+            
+            ' --- Safety checks ---
+            If mailItem.Class <> olMail Then LogSkippedItem logFilePath, mailItem.Subject, "Not a true MailItem": GoTo NextItemInLoop
+            If mailItem.Size = 0 Then LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0": GoTo NextItemInLoop
+            If mailItem.Permission <> olUnrestricted Then LogSkippedItem logFilePath, mailItem.Subject, "Item is IRM Protected": GoTo NextItemInLoop
+            If mailItem.Attachments.Count = 1 And LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then LogSkippedItem logFilePath, mailItem.Subject, "S/MIME Encrypted": GoTo NextItemInLoop
 
+            ' --- 1. FILENAME BUILDER ---
+            Dim safeSubj As String, datePrefix As String, room As Long, roomForTmp As Long, roomForPdf As Long
+            Const cMAX_PATH As Long = 260
+            safeSubj = CleanFile(mailItem.Subject)
+            datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
+            roomForTmp = (cMAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
+            roomForPdf = (cMAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
+            If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
+            If room < 10 Then room = 10
+            If Len(safeSubj) > room Then safeSubj = Left$(safeSubj, room)
+            tmpFile = GetUniqueTempMHT(mailItem, tmpExt)
+            pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
 
-        ' --- 1. FILENAME BUILDER ---
-        ' ... (code is correct and unchanged) ...
-        Dim safeSubj As String, datePrefix As String, room As Long, roomForTmp As Long, roomForPdf As Long
-        Const cMAX_PATH As Long = 260
-        safeSubj = CleanFile(mailItem.Subject)
-        datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
-        roomForTmp = (cMAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
-        roomForPdf = (cMAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
-        If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
-        If room < 10 Then room = 10
-        If Len(safeSubj) > room Then safeSubj = Left$(safeSubj, room)
-        tmpFile = GetUniqueTempMHT(mailItem, tmpExt)
-        pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
+            ' --- 2. SAVE AS MHT (with MSG fallback) ---
+            On Error Resume Next
+            mailItem.SaveAs tmpFile, olMHTML
+            If Err.Number <> 0 Then
+                Err.Clear
+                LogSkippedItem logFilePath, mailItem.Subject, "MHTML save failed, falling back to .MSG"
+                Dim msgFallbackFile As String
+                msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
+                If fso.FileExists(msgFallbackFile) Then fso.DeleteFile msgFallbackFile, True
+                mailItem.SaveAs msgFallbackFile, 9 ' olMSGUnicode
+                GoTo NextItemInLoop
+            End If
+            On Error GoTo 0
+            
+            ' --- 3. OPEN IN WORD & PREPARE ---
+            Set doc = Nothing
+            On Error Resume Next
+            Set doc = wrd.Documents.Open(FileName:=tmpFile, ConfirmConversions:=False, ReadOnly:=True, Visible:=False, Format:=wdOpenFormatWebPages)
+            On Error GoTo 0
+            If doc Is Nothing Then LogSkippedItem logFilePath, mailItem.Subject, "Word could not open MHT": GoTo NextItemInLoop
 
-        ' --- 2. SAVE AS MHT (with MSG fallback) ---
-        ' ... (code is correct and unchanged) ...
-        On Error Resume Next
-        mailItem.SaveAs tmpFile, olMHTML
-        If Err.Number <> 0 Then
-            Err.Clear
-            LogSkippedItem logFilePath, mailItem.Subject, "MHTML save failed, falling back to .MSG"
-            Dim msgFallbackFile As String
-            msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
-            If fso.FileExists(msgFallbackFile) Then fso.DeleteFile msgFallbackFile, True
-            mailItem.SaveAs msgFallbackFile, 9 ' olMSGUnicode
-            GoTo NextItemInLoop
-        End If
-        On Error GoTo 0
-        
-        ' --- 3. OPEN IN WORD & PREPARE ---
-        ' ... (code is correct and unchanged) ...
-        Set doc = Nothing
-        On Error Resume Next
-        Set doc = wrd.Documents.Open(FileName:=tmpFile, ConfirmConversions:=False, ReadOnly:=True, Visible:=False, Format:=wdOpenFormatWebPages)
-        On Error GoTo 0
-        If doc Is Nothing Then LogSkippedItem logFilePath, mailItem.Subject, "Word could not open MHT": GoTo NextItemInLoop
+            ' --- Inject Header ---
+            Dim hdr As String
+            hdr = "From:    " & mailItem.SenderName & vbCrLf & "Sent:    " & mailItem.SentOn & vbCrLf & "To:      " & mailItem.To & vbCrLf & "CC:      " & mailItem.CC & vbCrLf & "BCC:     " & mailItem.BCC & vbCrLf & "Subject: " & mailItem.Subject & vbCrLf & String(60, "—") & vbCrLf & vbCrLf
+            If InStr(1, doc.Range(0, 50).Text, "From:") = 0 Then doc.Range.InsertBefore hdr
 
-        ' --- Inject Header ---
-        ' ... (code is correct and unchanged) ...
-        Dim hdr As String
-        hdr = "From:    " & mailItem.SenderName & vbCrLf & "Sent:    " & mailItem.SentOn & vbCrLf & "To:      " & mailItem.To & vbCrLf & "CC:      " & mailItem.CC & vbCrLf & "BCC:     " & mailItem.BCC & vbCrLf & "Subject: " & mailItem.Subject & vbCrLf & String(60, "—") & vbCrLf & vbCrLf
-        If InStr(1, doc.Range(0, 50).Text, "From:") = 0 Then doc.Range.InsertBefore hdr
+            '================================================================================
+            '--- LAYER 2: QUOTED TEXT REMOVAL (Using the new, corrected function) ---
+            '================================================================================
+            Call TrimQuotedContent(doc)
+            
+            ' --- 4. EXPORT TO PDF & CLEANUP ---
+            If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
+            doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
+            doc.Close False
+            Set doc = Nothing
+            fso.DeleteFile tmpFile
+            
+            done = done + 1
+            If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
 
-        '================================================================================
-        '--- LAYER 2: QUOTED TEXT REMOVAL (Using the new, corrected function) ---
-        '================================================================================
-        Call TrimQuotedContent(doc)
-        
-        ' --- 4. EXPORT TO PDF & CLEANUP ---
-        ' ... (code is correct and unchanged) ...
-        If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
-        doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
-        doc.Close False
-        Set doc = Nothing
-        fso.DeleteFile tmpFile
-        
-        done = done + 1
-        ' FIX: Target Word's status bar (Your suggestion)
-        If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
+        End If ' End of "If TypeOf miAsVariant Is Outlook.MailItem"
 
 NextItemInLoop:
         If Not doc Is Nothing Then doc.Close False
-    Next mi
+    Next miAsVariant
 
     ' --- FINAL CLEANUP ---
-    ' FIX: Reset status bar correctly (Your suggestion)
     If showProgress Then wrd.StatusBar = False
     wrd.Quit
     Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
-    Set fso = Nothing: Set sel = Nothing: Set mi = Nothing
+    Set fso = Nothing: Set sel = Nothing
+    Set itm = Nothing
     Set mailItem = Nothing: Set convDict = Nothing
 
     MsgBox done & " mail(s) saved as PDF to " & tgtFolder & vbCrLf & vbCrLf & "A log of any skipped items has been saved to _SkippedItems.log", vbInformation
