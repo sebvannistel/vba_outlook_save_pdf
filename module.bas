@@ -191,50 +191,32 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
     GetUniqueTempMHT = try
 End Function
 
-' NEW FUNCTION - Strips quoted replies from the HTMLBody BEFORE saving to MHT.
+' MODIFIED FUNCTION - Strips quoted replies from the HTMLBody BEFORE saving to MHT.
 ' This is the primary fix for preventing conversation history in PDFs.
-Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
-    Dim body As String
-    Dim patterns As Variant
-    Dim pat As Variant
-    Dim pos As Long
-    Dim firstSeparatorPos As Long
-    
-    body = mailItem.HTMLBody
-    If Len(body) = 0 Then
-        StripQuotedBody = "" ' Return empty if body is empty
-        Exit Function
-    End If
-    
-    ' These patterns identify the start of a replied/forwarded message.
-    ' The function finds the EARLIEST match and trims from that point onwards.
-    ' This array can be extended with other language-specific separators.
-    patterns = Array( _
-        "<div class=""OutlookMessageHeader"">", _
-        "<hr", _
-        "-----Original Message-----", _
-        "<div class=3D""gmail_quote"">", _
-        "<blockquote>" _
-    )
-    
-    ' Using 0 as "not found"
-    firstSeparatorPos = 0
+Private Function StripQuotedBody(mi As Outlook.MailItem) As String
+    Dim html$, re As Object, m As Object
+    html = mi.HTMLBody
+    If Len(html) = 0 Then Exit Function   'nothing to do
 
-    ' Loop through each pattern to find the one that appears EARLIEST
-    For Each pat In patterns
-        pos = InStr(1, body, CStr(pat), vbTextCompare)
-        If pos > 0 Then
-            If firstSeparatorPos = 0 Or pos < firstSeparatorPos Then
-                firstSeparatorPos = pos
-            End If
-        End If
-    Next pat
-    
-    ' If a separator was found, truncate the string. Otherwise, return the original.
-    If firstSeparatorPos > 0 Then
-        StripQuotedBody = Left(body, firstSeparatorPos - 1)
+    Set re = CreateObject("VBScript.RegExp")
+    re.Global = False
+    re.IgnoreCase = True
+    re.MultiLine = False
+    re.Pattern = "(?s)" & _                       'single-line mode
+                "(<div[^>]*class=""(?:outlookmessageheader|gmail_quote|gmail_attr)""[^>]*>)|" & _
+                "(<hr[^>]*>)|" & _
+                "(<!--\s*StartFragment\s*-->)|" & _
+                "(-----\s*Original Message\s*-----)|" & _
+                "(----\s*Forwarded message\s*----)|" & _
+                "(?m)^\s*On .+ wrote:|" & _        'plain EN
+                "(?m)^\s*Von: .+Gesendet:|" & _    'plain DE
+                "(?m)^\s*Le .+ a écrit :"          'plain FR
+
+    If re.Test(html) Then
+        Set m = re.Execute(html)(0)
+        StripQuotedBody = Left$(html, m.FirstIndex)
     Else
-        StripQuotedBody = body
+        StripQuotedBody = html
     End If
 End Function
 
@@ -281,7 +263,8 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             If .Execute = True Then
                 ' Safety check: don't trim if the separator is at the very top
                 ' (e.g., the main "From:" line of the original email).
-                If findRange.Start > 200 Then
+                ' MODIFIED LINE
+                If findRange.Start > 40 Then
                     ' If this is the first separator found, or if it's earlier
                     ' than the previous best, record its position.
                     If firstSeparatorPos = -1 Or findRange.Start < firstSeparatorPos Then
