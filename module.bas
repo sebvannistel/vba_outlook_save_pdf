@@ -580,7 +580,6 @@ Sub SaveAsPDFfile()
         GoTo Cleanup
     End If
 
-    Dim total As Long
     total = sel.Count
 
     ' Step 3: Initialize worker objects
