@@ -504,7 +504,6 @@ End Sub
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
-    Const olDiscard As Long = 1
     Const wdExportFormatPDF As Long = 17
     Const MAX_PATH As Long = 259
 
@@ -542,6 +541,13 @@ Sub SaveAsPDFfile()
     '-----------------------------------------------------------------
     ' PASS 1 – keep just the newest item per conversation
     Dim latest As Object: Set latest = CreateObject("Scripting.Dictionary")
+    
+    ' *** UPDATE: Guard against COM failure to create the dictionary ***
+    If latest Is Nothing Then          '— bail out if COM failed —
+        MsgBox "Could not create Scripting.Dictionary – is scrrun.dll registered?", vbCritical
+        Exit Sub
+    End If
+    
     Dim k As String, it As Object
 
     For Each it In sel
@@ -601,6 +607,12 @@ Sub SaveAsPDFfile()
         On Error Resume Next ' In case .StatusBar is deprecated or causes an error
         Application.ActiveExplorer.StatusBar = "Preparing to save " & total & " selected email(s)..."
         On Error GoTo 0
+    End If
+
+    ' *** UPDATE: Guard against the 'latest' variable being overwritten before the loop ***
+    If Not (TypeName(latest) = "Dictionary") Then
+        MsgBox "Internal error – variable <latest> is no longer a dictionary.", vbCritical
+        Exit Sub
     End If
 
     ' FIX #1: Iterate over the filtered dictionary items, not the original selection
