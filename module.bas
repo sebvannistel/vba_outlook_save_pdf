@@ -50,6 +50,7 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
         .InitialFileName = sTargetFolder
+        SetForegroundWindow objWord.hWnd
         .Show
 
         On Error Resume Next
@@ -560,6 +561,10 @@ Sub SaveMails_ToPDF_Background()
                 ' UPDATE 4: Reuse the truncation helper for the “.msg” fallback path
                 msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
                 ' UPDATE 3: Prefer the real constant over the magic number
+                If fso.FileExists(msgFallbackFile) Then
+                    SetAttr msgFallbackFile, vbNormal
+                    fso.DeleteFile msgFallbackFile, True
+                End If
                 mailItem.SaveAs msgFallbackFile, 9   'olMSGUnicode
 
                 ' Since MHTML creation failed, we cannot create a PDF. Skip to the next item.
