@@ -564,12 +564,24 @@ Sub SaveAsPDFfile()
     If Len(tgtFolder) = 0 Then Exit Sub
 
     ' Step 2: Get selections
+    ' *** NEW: First, check if an Explorer window is even active ***
+    If Application.ActiveExplorer Is Nothing Then
+        MsgBox "Cannot run the macro." & vbCrLf & vbCrLf & _
+               "Please go to your main Outlook window, select the emails you want to save, " & _
+               "and then run the macro again.", vbExclamation, "No Active Window"
+        GoTo Cleanup
+    End If
+
+    ' Now that we know the Explorer exists, we can safely get the selection
     Set sel = Application.ActiveExplorer.Selection
-    total = sel.Count
-    If total = 0 Then
+
+    If sel.Count = 0 Then
         MsgBox "Please select one or more emails to save.", vbInformation, "No Items Selected"
         GoTo Cleanup
     End If
+
+    Dim total As Long
+    total = sel.Count
 
     ' Step 3: Initialize worker objects
     Set fso = CreateObject("Scripting.FileSystemObject")
