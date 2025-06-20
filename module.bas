@@ -14,6 +14,8 @@
 Option Explicit
 
 Private Const wdExportFormatPDF As Long = 17     'moved to module level
+Private Const olMHTML As Long = 10               'Added for late-binding
+Private Const olMSG As Long = 3                  'Added for late-binding
 
 Private objWord As Object
 
@@ -409,7 +411,8 @@ Sub SaveMails_ToPDF_Background()
     Const tmpExt As String = ".mht"
 
     Dim sel As Outlook.Selection
-    Dim mi  As Outlook.MailItem
+    Dim mi  As Object ' Use generic object for the loop to handle non-mail items
+    Dim mailItem As Outlook.MailItem ' Use a specific variable after type check
     Dim wrd As Object, doc As Object
     Dim tmpFile As String, pdfFile As String, tgtFolder As String
     Dim fso As Object, hdr As String
@@ -438,47 +441,89 @@ Sub SaveMails_ToPDF_Background()
 
     For Each mi In sel
 
-        '--- 1  build temp & final filenames ----------------------
-        'NOTE: This will call your existing 'CleanFile' function
-        tmpFile = Environ$("TEMP") & "\" & _
-                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & "_" & _
-                  CleanFile(mi.Subject) & tmpExt
+        ' FIX: Check if the selected item is a genuine MailItem before processing.
+        ' This prevents errors on items like meeting requests or reports.
+        If TypeOf mi Is Outlook.MailItem Then
+            Set mailItem = mi
 
-        pdfFile = tgtFolder & _
-                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & " – " & _
-                  CleanFile(mi.Subject) & ".pdf"
+            '--- 1  FIX A: Harden the filename builder to prevent MAX_PATH errors ---
+            Const MAX_PATH As Long = 260
+            Dim safeSubj As String, datePrefix As String, room As Long
+            Dim roomForTmp As Long, roomForPdf As Long
 
-        '--- 2  save the mail silently to MHT ---------------------
-        mi.SaveAs tmpFile, olMHTML
+            ' Sanitize subject line to remove illegal filename characters
+            safeSubj = CleanFile(mailItem.Subject)
+            datePrefix = Format(mailItem.ReceivedTime, "yyyymmdd-hhnnss")
 
-        '--- 3  open in Word and prepend header -------------------
-        Set doc = wrd.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
+            ' Calculate the maximum allowed length for the subject part to avoid
+            ' exceeding MAX_PATH for both the temporary and the final PDF file.
+            roomForTmp = MAX_PATH - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
+            roomForPdf = MAX_PATH - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
 
-        hdr = "From:    " & mi.SenderName & vbCrLf & _
-              "Sent:    " & mi.SentOn & vbCrLf & _
-              "To:      " & mi.To & vbCrLf & _
-              "CC:      " & mi.CC & vbCrLf & _
-              "BCC:     " & mi.BCC & vbCrLf & _
-              "Subject: " & mi.Subject & vbCrLf & _
-              String(60, "—") & vbCrLf & vbCrLf
+            ' Use the more restrictive of the two calculated lengths
+            If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
+            If room < 10 Then room = 10 ' Ensure a minimum filename length
 
-        doc.Range.InsertBefore hdr
+            ' Truncate the sanitized subject if it's too long
+            If Len(safeSubj) > room Then safeSubj = Left$(safeSubj, room)
 
-        '--- 4  export to PDF & clean up --------------------------
-        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
-        doc.Close False
-        fso.DeleteFile tmpFile
+            ' Build the final, safe filenames
+            tmpFile = Environ$("TEMP") & "\" & datePrefix & "_" & safeSubj & tmpExt
+            pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
 
-        done = done + 1
-        If showProgress Then
-            Application.StatusBar = "Saving mail " & done & " of " & total & "..."
-            If done Mod 25 = 0 Then DoEvents
-        End If
 
+            '--- 2  FIX B: Wrap SaveAs with a fallback to handle errors gracefully ---
+            On Error Resume Next
+            mailItem.SaveAs tmpFile, olMHTML
+            If Err.Number <> 0 Then
+                ' MHTML save failed. This can be due to retention policies, sync issues, etc.
+                ' Clear the error and attempt the fallback action.
+                Err.Clear
+
+                ' Fallback: Save the item as a .MSG file in the target folder instead.
+                Dim msgFallbackFile As String
+                msgFallbackFile = Replace(pdfFile, ".pdf", ".msg")
+                mailItem.SaveAs msgFallbackFile, olMSG
+
+                ' Since MHTML creation failed, we cannot create a PDF. Skip to the next item.
+                GoTo NextItemInLoop
+            End If
+            ' If we got here, SaveAs MHT succeeded. Restore normal error handling.
+            On Error GoTo 0
+
+
+            '--- 3  open in Word and prepend header -------------------
+            Set doc = wrd.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
+
+            hdr = "From:    " & mailItem.SenderName & vbCrLf & _
+                  "Sent:    " & mailItem.SentOn & vbCrLf & _
+                  "To:      " & mailItem.To & vbCrLf & _
+                  "CC:      " & mailItem.CC & vbCrLf & _
+                  "BCC:     " & mailItem.BCC & vbCrLf & _
+                  "Subject: " & mailItem.Subject & vbCrLf & _
+                  String(60, "—") & vbCrLf & vbCrLf
+
+            doc.Range.InsertBefore hdr
+
+            '--- 4  export to PDF & clean up --------------------------
+            doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+            doc.Close False
+            fso.DeleteFile tmpFile
+
+            done = done + 1
+            If showProgress Then
+                Application.StatusBar = "Saving mail " & done & " of " & total & "..."
+                If done Mod 25 = 0 Then DoEvents
+            End If
+        End If ' End of "If TypeOf mi Is Outlook.MailItem" check
+
+NextItemInLoop:
+        ' This label is the target for the GoTo statement when an error occurs.
+        ' It ensures the loop continues with the next item.
     Next mi
 
     If showProgress Then Application.StatusBar = False
     wrd.Quit
-    MsgBox sel.Count & " mail(s) saved to " & tgtFolder, vbInformation
+    MsgBox done & " mail(s) saved as PDF to " & tgtFolder, vbInformation
 
 End Sub
