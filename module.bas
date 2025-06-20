@@ -124,6 +124,7 @@ Sub SaveAsPDFfile()
     Const wdExportAllDocument = 0
     Const wdExportDocumentContent = 0
     Const wdExportCreateNoBookmarks = 0
+    Const ATTR_ALL = vbNormal + vbReadOnly + vbHidden + vbSystem
 
     Dim oSelection As Outlook.Selection
     Dim oMail As Outlook.MailItem
@@ -238,7 +239,6 @@ Sub SaveAsPDFfile()
     ' Get the user's TempFolder to store the item in
     Set objFSO = CreateObject("Scripting.FileSystemObject")
     sTempFolder = objFSO.GetSpecialFolder(2)
-    Set objFSO = Nothing
 
     ' ----------------------------------------------------
     ' We are ready to start
@@ -252,8 +252,14 @@ Sub SaveAsPDFfile()
         If Not done.Exists(oMail.ConversationID) Then
             done.Add oMail.ConversationID, True
 
-            ' Construct the filename for the temp mht-file
-            sTempFileName = sTempFolder & "\outlook.mht"
+            ' Construct a unique filename for the temp mht-file
+            sTempFileName = sTempFolder & "\" & Replace(objFSO.GetTempName, ".tmp", ".mht")
+
+            ' Delete any previous file with that name (ReadOnly or hidden)
+            If Len(Dir$(sTempFileName, ATTR_ALL)) > 0 Then
+                SetAttr sTempFileName, vbNormal
+                Kill sTempFileName
+            End If
 
             ' Save the mht-file
             oMail.SaveAs sTempFileName, olMHTML
@@ -299,13 +305,15 @@ Sub SaveAsPDFfile()
                 '--- ensure temporary file can be deleted --------------------
                 Dim attempt As Integer
                 For attempt = 1 To 3
-                    If Len(Dir$(sTempFileName, vbNormal)) = 0 Then Exit For
-                    On Error Resume Next
-                    SetAttr sTempFileName, vbNormal
-                    Kill sTempFileName
-                    On Error GoTo 0
-                    If Len(Dir$(sTempFileName, vbNormal)) = 0 Then Exit For
-                    DoEvents
+                    If objFSO.FileExists(sTempFileName) Then
+                        On Error Resume Next
+                        objFSO.DeleteFile sTempFileName, True
+                        On Error GoTo 0
+                        If Not objFSO.FileExists(sTempFileName) Then Exit For
+                        DoEvents
+                    Else
+                        Exit For
+                    End If
                 Next attempt
 
             End If
@@ -325,10 +333,15 @@ Sub SaveAsPDFfile()
     On Error GoTo 0
 
     '--- delete any remaining temporary file -----------------------
-    If Len(Dir$(sTempFileName, vbNormal)) > 0 Then
+    If Len(Dir$(sTempFileName, ATTR_ALL)) > 0 Then
         On Error Resume Next
         SetAttr sTempFileName, vbNormal
         Kill sTempFileName
+        On Error GoTo 0
+    End If
+    If objFSO.FileExists(sTempFileName) Then
+        On Error Resume Next
+        objFSO.DeleteFile sTempFileName, True
         On Error GoTo 0
     End If
 
@@ -338,6 +351,7 @@ Sub SaveAsPDFfile()
     Set oMail = Nothing
     Set objDoc = Nothing
     Set objWord = Nothing
+    Set objFSO = Nothing
 
     MsgBox "Done, mails have been exported to " & sTargetFolder, vbInformation
 
