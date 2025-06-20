@@ -16,6 +16,7 @@ Option Explicit
 Private Const wdExportFormatPDF As Long = 17     'moved to module level
 Private Const olMHTML As Long = 10               'Added for late-binding
 Private Const olMSG As Long = 3                  'Added for late-binding
+Private Const olUnrestricted As Long = 0         'NEW: For version-independent IRM/RMS check
 
 Private objWord As Object
 
@@ -475,10 +476,26 @@ Sub SaveMails_ToPDF_Background()
                 LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0 (header only, not downloaded)"
                 GoTo NextItemInLoop
             End If
-            If mailItem.IsRestricted Then
-                LogSkippedItem logFilePath, mailItem.Subject, "Item is restricted (M365 Record/RMS Protected)"
+
+            ' --- START: UPDATES BASED ON YOUR INSTRUCTIONS ---
+            
+            ' UPDATE (Instruction 2): A version-independent way to detect protected mail.
+            ' This replaces the newer .IsRestricted property with the backward-compatible .Permission property.
+            If mailItem.Permission <> olUnrestricted Then
+                LogSkippedItem logFilePath, mailItem.Subject, "Item is protected by Information Rights Management (RMS/IRM)"
                 GoTo NextItemInLoop
             End If
+
+            ' UPDATE (Instruction 4): Optional hard-skip for encrypted S/MIME mail.
+            ' This detects opaque S/MIME messages that arrive as a .p7m attachment and cannot be processed.
+            If mailItem.Attachments.Count = 1 _
+               And LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then
+                LogSkippedItem logFilePath, mailItem.Subject, "Item is an S/MIME encrypted message (.p7m attachment)"
+                GoTo NextItemInLoop
+            End If
+
+            ' --- END: UPDATES BASED ON YOUR INSTRUCTIONS ---
+
 
             '--- 1  FIX A: Harden the filename builder to prevent MAX_PATH errors ---
             Const MAX_PATH As Long = 260
