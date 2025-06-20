@@ -544,7 +544,15 @@ Sub SaveAsPDFfile()
     ' FIX #1: Pick only the latest item before you open Word
     '-----------------------------------------------------------------
     ' PASS 1 – keep just the newest item per conversation
-    Dim latest As Object: Set latest = CreateObject("Scripting.Dictionary")
+    Dim latest As Object
+    Set latest = CreateObject("Scripting.Dictionary")
+
+    '--- HARD-GUARD: bail out if dictionary not built ---
+    If latest Is Nothing Then
+        MsgBox "Dictionary object could not be created – Scripting Runtime missing.", vbCritical
+        Exit Sub
+    End If
+    
     Dim k As String, it As Object
 
     For Each it In sel
@@ -606,8 +614,14 @@ Sub SaveAsPDFfile()
         On Error GoTo 0
     End If
 
+    ' <<< NEW GUARD INSERTED HERE >>>
+    If Not (TypeName(latest) = "Dictionary") Then
+        MsgBox "Internal error – variable <latest> is no longer a dictionary.", vbCritical
+        Exit Sub
+    End If
+
     ' FIX #1: Iterate over the filtered dictionary items, not the original selection
-    For Each item In latest.Items
+    For Each item In latest.Items   ' <-- safe now
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
         
