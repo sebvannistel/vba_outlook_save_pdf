@@ -124,7 +124,6 @@ Sub SaveAsPDFfile()
     Const wdExportAllDocument = 0
     Const wdExportDocumentContent = 0
     Const wdExportCreateNoBookmarks = 0
-    Const ATTR_ALL = vbNormal + vbReadOnly + vbHidden + vbSystem
 
     Dim oSelection As Outlook.Selection
     Dim oMail As Object
@@ -138,8 +137,8 @@ Sub SaveAsPDFfile()
     Dim fdf As FileDialogFilter
     Dim I As Integer, wSelectedeMails As Integer
     Dim sFileName As String
-    Dim sTempFolder As String
     Dim sTargetFolder As String
+    Dim iCount As Long
 
     Dim bContinue As Boolean
     Dim bAskForFileName As Boolean
@@ -234,26 +233,25 @@ Sub SaveAsPDFfile()
     End If
 
     ' ----------------------------------------------------
-    ' Get the user's TempFolder to store the item in
+    ' Initialize file system for folder and file checks
     Set objFSO = CreateObject("Scripting.FileSystemObject")
-    sTempFolder = objFSO.GetSpecialFolder(2)
+
+    If Not objFSO.FolderExists(sTargetFolder) Then
+        objFSO.CreateFolder sTargetFolder
+    End If
 
     ' ----------------------------------------------------
     ' We are ready to start
     For Each oMail In oSelection
 
-            '## 1  build trimmed HTML and make sure it closes
-            Dim ts As Object, tmp As String
-            tmp = sTempFolder & "\" & objFSO.GetTempName & ".htm"
+            Const MAX_PATH As Long = 260              'official value
 
-            Set ts = objFSO.CreateTextFile(tmp, True, True)
-            ts.Write StripQuotedBody(oMail)
-            ts.Close                                      '<<< flushes to disk
+            '1.  Trim quoted thread, render, and grab live Word.Document
+            oMail.HTMLBody = StripQuotedBody(oMail)    'update body in place
+            oMail.Display False                        'builds WordEditor invisibly
+            Set objDoc = oMail.GetInspector.WordEditor
 
-            Set objDoc = objWord.Documents.Open(tmp, False, True)
-
-            '## 2  build a unique PDF name (you already had this)
-            Const MAX_PATH As Long = 260
+            '2.  Build the unique PDF name
             Dim base$, try$, dup&, room&
             base = sTargetFolder & Format(ItemDate(oMail), "yyyymmdd-hhnnss") _
                    & " – " & CleanSubject(oMail.Subject)
@@ -265,20 +263,22 @@ Sub SaveAsPDFfile()
             Do While objFSO.FileExists(try)
                 try = base & "_" & dup & ".pdf": dup = dup + 1
             Loop
-            
+
             If bAskForFileName Then sFileName = AskForFileName(try) Else sFileName = try
-            
-            If Not (Trim(sFileName) = "") Then
-                
-                '## 3  export
-                objDoc.ExportAsFixedFormat sFileName, wdExportFormatPDF
-                objDoc.Close False
 
-                '## 4  tidy up temp file
-                objFSO.DeleteFile tmp, True
-
+            '3.  Export and close
+            If Len(Trim$(sFileName)) > 0 Then
+                objDoc.ExportAsFixedFormat _
+                    OutputFileName:=sFileName, _
+                    ExportFormat:=wdExportFormatPDF, _
+                    OptimizeFor:=wdExportOptimizeForPrint, _
+                    Range:=wdExportAllDocument, Item:=wdExportDocumentContent, _
+                    CreateBookmarks:=wdExportCreateNoBookmarks
             End If
-            
+
+            iCount = iCount + 1
+            If iCount Mod 50 = 0 Then DoEvents
+
     Next oMail
 
     Set dlgSaveAs = Nothing
