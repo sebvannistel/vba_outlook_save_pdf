@@ -565,6 +565,7 @@ Sub SaveMails_ToPDF_Background()
     Const PATH_WARN As Long = 220
     Const wdExportOptimizeForPrint As Long = 0
     Const olDiscard As Long = 1 ' Constant for MailItem.Close
+    Const wdExportCreateNoBookmarks = 0 ' New constant for bookmarks
 
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
@@ -605,48 +606,39 @@ Sub SaveMails_ToPDF_Background()
         GoTo Cleanup
     End If
 
-    ' --- START: BULLETPROOF DICTIONARY POPULATION LOOP ---
     For Each itm In sel
-        ' Only process valid MailItem objects from the start
         If TypeOf itm Is Outlook.MailItem Then
-            On Error Resume Next ' Temporarily ignore errors from problematic items
+            On Error Resume Next
             key = itm.ConversationID
             If Err.Number <> 0 Or Len(key) = 0 Then
                 Err.Clear
                 key = itm.EntryID
             End If
-            
-            ' If we still couldn't get a key, skip this item entirely
             If Err.Number <> 0 Or Len(key) = 0 Then
                 Err.Clear
                 GoTo NextSelectionItem
             End If
-            On Error GoTo ErrorHandler ' Restore normal error handling
+            On Error GoTo ErrorHandler
 
-            ' **FIX 2: Use the canonical and safe Add/Update pattern**
             If Not convDict.Exists(key) Then
-                convDict.Add key, itm ' Use .Add for new items
+                convDict.Add key, itm
             Else
-                ' Robustly check if the new item is newer than the existing one
                 Set existingItem = convDict(key)
                 isNewer = False
-                
-                On Error Resume Next ' Handle items that might not have a ReceivedTime
+                On Error Resume Next
                 isNewer = (itm.ReceivedTime > existingItem.ReceivedTime)
                 If Err.Number <> 0 Then
-                    isNewer = False ' If comparison fails, assume not newer
+                    isNewer = False
                     Err.Clear
                 End If
                 On Error GoTo ErrorHandler
-                
                 If isNewer Then
-                    Set convDict(key) = itm ' Use Set to update existing items
+                    Set convDict(key) = itm
                 End If
             End If
         End If
 NextSelectionItem:
     Next itm
-    ' --- END: BULLETPROOF DICTIONARY POPULATION LOOP ---
     
     total = convDict.Count
     showProgress = (total > 1)
@@ -655,34 +647,25 @@ NextSelectionItem:
     '================================================================================
     '--- MAIN EXPORT LOOP ---
     '================================================================================
-    ' **FIX 1: Change the loop variable from Object to Variant**
     Dim mailItemVariant As Variant
     Dim mailItem As Outlook.MailItem
 
     For Each mailItemVariant In convDict.Items
 
-        ' **This is the new, crucial check that prevents the crash.**
-        ' We check the type *after* successfully receiving it into the Variant.
         If TypeOf mailItemVariant Is Outlook.MailItem Then
-            Set mailItem = mailItemVariant ' Assign it to our strongly-typed object
+            Set mailItem = mailItemVariant
         Else
-            ' The item was invalid (Nothing, Empty, or wrong type). Skip it.
             skipped = skipped + 1
             LogSkippedItem logFilePath, "Unknown Item", "Item in collection was not a valid Mail object."
-            GoTo NextDictionaryItem ' Jump to the next item in the loop
+            GoTo NextDictionaryItem
         End If
         
-        ' --- From here on, we know 'mailItem' is a valid object ---
-        
-        ' Open the item in a hidden Inspector (with protection for IRM mail)
         On Error Resume Next
         mailItem.Display False
         Set doc = mailItem.GetInspector.WordEditor
-        
         If doc Is Nothing Or Err.Number <> 0 Then
-            ' Failed to get the Word editor (e.g., IRM protected mail)
             Err.Clear
-            mailItem.Close olDiscard ' Attempt to close the item
+            mailItem.Close olDiscard
             skipped = skipped + 1
             LogSkippedItem logFilePath, mailItem.Subject, "Could not access content (possibly protected)."
             GoTo NextDictionaryItem
@@ -691,24 +674,47 @@ NextSelectionItem:
 
         Call InjectSimpleHeader(doc, mailItem)
 
-        Dim safeSubj As String, datePrefix As String
+        ' *** START: HARDENED FILENAME AND EXPORT BLOCK ***
+        Dim safeSubj As String, datePrefix As String, baseName As String
+        Const MAX_PATH As Long = 259 ' Windows API limit
         safeSubj = CleanFile(mailItem.Subject)
         datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
-        pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
+        baseName = datePrefix & " – " & safeSubj
         
-        If Len(pdfFile) >= 260 Then
-            pdfFile = Left$(tgtFolder & datePrefix & " – ", 255 - 4) & ".pdf"
+        ' 1. Stricter path length check to prevent the export error
+        If Len(tgtFolder & baseName & ".pdf") >= MAX_PATH Then
+            baseName = Left$(baseName, MAX_PATH - Len(tgtFolder) - 5)
         End If
+        pdfFile = tgtFolder & baseName & ".pdf"
 
+        ' 2. Ensure we're not overwriting a locked file
         If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
-        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
-        doc.Close False
+
+        On Error Resume Next ' Catch any final, unexpected export errors
+        
+        ' 3. Robust PDF export with parameters to prevent common failures
+        doc.ExportAsFixedFormat _
+            OutputFileName:=pdfFile, _
+            ExportFormat:=wdExportFormatPDF, _
+            OptimizeFor:=wdExportOptimizeForPrint, _
+            KeepIRM:=False, _
+            BitmapMissingFonts:=True, _
+            CreateBookmarks:=wdExportCreateNoBookmarks
+            
+        If Err.Number <> 0 Then
+            skipped = skipped + 1
+            LogSkippedItem logFilePath, mailItem.Subject, "Export failed (Error " & Err.Number & ": " & Err.Description & ")"
+            Err.Clear
+        Else
+            done = done + 1
+        End If
+        On Error GoTo ErrorHandler
+        ' *** END: HARDENED FILENAME AND EXPORT BLOCK ***
 
         mailItem.Close olDiscard
         Set doc = Nothing
         
-        done = done + 1
-        If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
+        If showProgress Then wrd.StatusBar = "Processing mail " & (done + skipped) & " of " & total & "..."
 
 NextDictionaryItem:
     Next mailItemVariant
