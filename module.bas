@@ -1,12 +1,12 @@
-#If VBA7 Then
+'#If VBA7 Then
     Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
     Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
     Private Declare PtrSafe Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
-#Else
-    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
-    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
-    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
-#End If
+'#Else
+'    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
+'    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
+'    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+'#End If
 ' --------------------------------------------------
 '
 ' Outlook macro to save a selected item(s) as pdf
@@ -30,72 +30,41 @@ Private Const wdOpenFormatWebPages As Long = 7
 
 Private objWord As Object
 
-' --------------------------------------------------
-'
-' Ask the user for the folder where to store emails
-'
-' --------------------------------------------------
-Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
+' =========================================================================================
+' === STABILITY FIX: Use Outlook's native File Dialog instead of Word's.             ===
+' === This avoids cross-application UI issues and the need for API calls.             ===
+' =========================================================================================
+Private Function AskForTargetFolder(ByVal sInitialFolder As String) As String
+    Dim dlg As FileDialog
+    Dim selectedFolder As String
 
-    Dim dlgSaveAs As FileDialog
+    ' Use Outlook's Application.FileDialog - it's 100% stable
+    Set dlg = Application.FileDialog(msoFileDialogFolderPicker)
 
-    sTargetFolder = Trim(sTargetFolder)
-
-    ' Be sure that sTargetFolder is well ending by a slash
-    If Not (Right(sTargetFolder, 1) = "\") Then
-        sTargetFolder = sTargetFolder & "\"
-    End If
-
-    ' Already initialized before, so it's safe to just get the object
-    Set dlgSaveAs = objWord.FileDialog(msoFileDialogFolderPicker)
-
-    With dlgSaveAs
+    With dlg
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
-        .InitialFileName = sTargetFolder
-        
-        '--- START: Version-safe method to bring Word to the foreground ---
-        ' The Word.Application object does not have an .Hwnd property.
-        ' We must get the handle from the ActiveWindow or use FindWindow API.
-        Dim wHwnd As LongPtr
-        On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
-        wHwnd = objWord.ActiveWindow.hWnd ' Word’s real property
-        If Err.Number <> 0 Then           ' If that fails, fall back to API
-            Err.Clear
-            ' Use Win32 FindWindow on the Word application's class name "OpusApp"
-            wHwnd = FindWindowA("OpusApp", vbNullString)
-        End If
-        On Error GoTo 0                   ' Restore normal error trapping
-
-        ' If we successfully got a handle, bring the window to the front.
-        If wHwnd <> 0 Then
-            Call SetForegroundWindow(wHwnd)
-        End If
-        '--- END: Version-safe method ---
-        
-        .Show
-
-        On Error Resume Next
-
-        sTargetFolder = .SelectedItems(1)
-
-        If Err.Number <> 0 Then
-            sTargetFolder = ""
-            Err.Clear
+        If Len(sInitialFolder) > 0 Then
+            .InitialFileName = sInitialFolder
         End If
 
-        On Error GoTo 0
-
+        ' Show the dialog. If the user clicks OK, .Show returns -1
+        If .Show = -1 Then
+            selectedFolder = .SelectedItems(1)
+            ' Ensure the path ends with a backslash
+            If Right(selectedFolder, 1) <> "\" Then
+                selectedFolder = selectedFolder & "\"
+            End If
+        Else
+            ' User cancelled
+            selectedFolder = ""
+        End If
     End With
 
-    ' Be sure that sTargetFolder is well ending by a slash
-    If Not (Right(sTargetFolder, 1) = "\") Then
-        sTargetFolder = sTargetFolder & "\"
-    End If
-
-    AskForTargetFolder = sTargetFolder
-
+    AskForTargetFolder = selectedFolder
+    Set dlg = Nothing
 End Function
+
 
 ' --------------------------------------------------
 '
@@ -381,9 +350,10 @@ End Function
 
 '========== 1) universal time getter ==========
 Private Function ItemDate(itm As Object) As Date
+    On Error Resume Next
     Select Case True
-        Case TypeOf itm Is Outlook.mailItem
-            If itm.ReceivedTime = #1/1/4501# Then
+        Case TypeOf itm Is Outlook.MailItem
+            If itm.ReceivedTime < #1/2/1900# Then 'Check for very old or invalid dates
                 ItemDate = itm.SentOn
             Else
                 ItemDate = itm.ReceivedTime
@@ -393,6 +363,8 @@ Private Function ItemDate(itm As Object) As Date
         Case Else
             ItemDate = Now
     End Select
+    If Err.Number <> 0 Then ItemDate = Now ' Fallback for any error
+    On Error GoTo 0
 End Function
 
 
@@ -457,7 +429,7 @@ Private Function CleanFile(s As String) As String
 End Function
 
 '--- HELPER: Injects a simple header that looks like Outlook's print style ---
-Private Sub InjectSimpleHeader(doc As Object, m As Outlook.mailItem)
+Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error Resume Next ' In case a property is not available
     Dim hdr As String
     hdr = "From: " & m.SenderName & vbCrLf & _
@@ -471,7 +443,7 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.mailItem)
 End Sub
 
 '--- NEW HELPER (AS PER FIX): Injects a full header with a duplicate guard ---
-Private Sub InjectFullHeader(doc As Object, m As Outlook.mailItem)
+Private Sub InjectFullHeader(doc As Object, m As Outlook.MailItem)
     On Error Resume Next ' In case a property is not available
     Dim hdr As String
     hdr = "From: " & m.SenderName & vbCrLf & _
@@ -505,13 +477,14 @@ Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String,
 End Sub
 
 '--- helper: always create a unique temp MHT name
-Private Function GetUniqueTempMHT(mi As Outlook.mailItem, ext As String) As String
+Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     Dim base$, try$
     base = Environ$("TEMP") & "\" & Format(ItemDate(mi), "yyyymmdd-hhnnss") _
            & "_" & CleanFile(mi.Subject)
     Do
-        try = Left$(base, 200) & "_" & Hex(Timer * 1000) & ext   ' <= always unique
+        ' Timer can be 0 at midnight; add Rnd for more robustness
+        try = Left$(base, 200) & "_" & Hex((Timer * 1000) + (Rnd * 1000)) & ext
     Loop While fso.FileExists(try)
     GetUniqueTempMHT = try
 End Function
@@ -548,7 +521,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             .ClearFormatting
             .Text = pat
             .Forward = True
-            .Wrap = wdFindContinue
+            .Wrap = wdFindContinue ' Use wdFindStop to prevent wrapping around
             .Format = False
             .MatchCase = False
             .MatchWildcards = True
@@ -556,11 +529,11 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             If .Execute = True Then
                 ' Safety check: don't trim if the separator is at the very top
                 ' (e.g., the main "From:" line of the original email).
-                If .Parent.Start > 200 Then
+                If findRange.Start > 200 Then
                     ' If this is the first separator found, or if it's earlier
                     ' than the previous best, record its position.
-                    If firstSeparatorPos = -1 Or .Parent.Start < firstSeparatorPos Then
-                        firstSeparatorPos = .Parent.Start
+                    If firstSeparatorPos = -1 Or findRange.Start < firstSeparatorPos Then
+                        firstSeparatorPos = findRange.Start
                     End If
                 End If
             End If
@@ -577,187 +550,156 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
 End Sub
 
 
-'Save selected Outlook messages as PDFs – quiet, de-duplicated, & with headers
-Sub SaveMails_ToPDF_Background()
+' =========================================================================================
+' === REVISED, STABLE MAIN PROCEDURE                                                    ===
+' =========================================================================================
+Sub SaveMails_ToPDF_Background_Stable()
     ' --- SETUP ---
-    Const olMail As Long = 43
-    Const PATH_WARN As Long = 220
-    Const wdExportOptimizeForPrint As Long = 0
-    Const olDiscard As Long = 1 ' Constant for MailItem.Close
-    Const wdExportCreateNoBookmarks = 0 ' New constant for bookmarks
+    Const olDiscard As Long = 1
+    Const wdExportFormatPDF As Long = 17
+    Const MAX_PATH As Long = 259 ' Windows API limit for full file paths
 
+    ' --- OBJECTS & VARIABLES ---
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
-    Dim pdfFile As String, tgtFolder As String, logFilePath As String
-    Dim total As Long, done As Long, skipped As Long, showProgress As Boolean
-    Dim usedNames As Object ' <<< UPDATE 3: Declare dictionary for unique names
-    Dim tmpMht As String    ' <<< UPDATE 2: Declare variable for temporary MHT file
+    Dim mailItem As Outlook.MailItem
+    Dim mailInspector As Outlook.Inspector ' Kept for reference, but not used in MHT method
+
+    Dim tgtFolder As String, logFilePath As String
+    Dim done As Long, skipped As Long, total As Long
 
     ' --- INITIALIZE ---
     On Error GoTo ErrorHandler
-    Set wrd = CreateObject("Word.Application")
-    '===== before entering the main loop ==================================
-    wrd.ScreenUpdating = False           ' <-- NEW -- stops display flicker
-    Set objWord = wrd
-    ' wrd.Visible = True ' <-- For debugging only
-    
-    tgtFolder = AskForTargetFolder("")
-    
-    If Len(tgtFolder) > PATH_WARN Then
-        MsgBox "The selected folder path is too long. Please choose a shorter path to avoid errors.", vbExclamation, "Path Too Long"
-        GoTo Cleanup
-    End If
-    
+
+    ' Step 1: Get target folder using the STABLE native dialog
+    ' Note: Using "C:\Temp" as a default starting point.
+    tgtFolder = AskForTargetFolder("C:\Temp")
+    If Len(tgtFolder) = 0 Then Exit Sub ' User cancelled
+
+    ' Step 2: Get selections and create worker objects
     Set sel = Application.ActiveExplorer.Selection
-    If sel.Count = 0 Or Len(tgtFolder) = 0 Then
-        GoTo Cleanup
-    End If
-    
-    logFilePath = tgtFolder & "_SkippedItems.log"
-    wrd.DisplayAlerts = 0
+    total = sel.Count
+    If total = 0 Then GoTo Cleanup
+
     Set fso = CreateObject("Scripting.FileSystemObject")
-    Set usedNames = CreateObject("Scripting.Dictionary") ' <<< UPDATE 3: Initialize dictionary
+    logFilePath = tgtFolder & "_SkippedItems_" & Format(Now, "yyyymmdd_hhnnss") & ".log"
+
+    Set wrd = CreateObject("Word.Application")
+    wrd.Visible = False
+    wrd.DisplayAlerts = 0 ' Suppress Word's own popups
+    Set objWord = wrd     ' Make Word object available to older helper functions if needed
 
     '================================================================================
-    '--- NO PRE-FILTERING: Iterate through all selected items ---
+    '--- MAIN EXPORT LOOP (STABILIZED) ---
     '================================================================================
-    'FIX: The de-duplication dictionary (convDict) has been removed to ensure
-    'every selected item is processed, not just the latest in a conversation.
+    Dim item As Object
+    Dim progressCounter As Long
     
-    total = sel.Count ' Process all selected items
-    showProgress = (total > 1)
-    If showProgress Then wrd.StatusBar = "Preparing to save " & total & " selected mail(s)..."
+    Application.StatusBar = "Preparing to save " & total & " selected email(s)..."
 
-    '================================================================================
-    '--- MAIN EXPORT LOOP ---
-    '================================================================================
-    Dim mailItemVariant As Variant
-    Dim mailItem As Outlook.MailItem
-
-    'FIX: Iterate directly over the selection (sel) instead of the de-duped dictionary
-    For Each mailItemVariant In sel
-
-        If TypeOf mailItemVariant Is Outlook.MailItem Then
-            Set mailItem = mailItemVariant
-        Else
-            skipped = skipped + 1
-            LogSkippedItem logFilePath, "Unknown Item", "Item in collection was not a valid Mail object."
-            GoTo NextSelectedItem
-        End If
+    For Each item In sel
+        progressCounter = progressCounter + 1
+        ' STABILITY FIX: Add DoEvents to prevent freezing and update status
+        If progressCounter Mod 5 = 0 Then DoEvents
+        Application.StatusBar = "Processing " & progressCounter & " of " & total & "..."
         
+        If TypeOf item Is Outlook.MailItem Then
+            Set mailItem = item
+        Else
+            ' Log and skip non-mail items
+            skipped = skipped + 1
+            LogSkippedItem logFilePath, "Unknown Item Type", "Item in selection was not a mail item."
+            GoTo NextItem
+        End If
+
+        ' Use the MHT method as it is more stable than GetInspector
+        Dim tmpMht As String, pdfFile As String, baseName As String
         On Error Resume Next
-        mailItem.Display False
-        Set doc = mailItem.GetInspector.WordEditor
-        If doc Is Nothing Or Err.Number <> 0 Then
-            Err.Clear
-            mailItem.Close olDiscard
-            skipped = skipped + 1
-            LogSkippedItem logFilePath, mailItem.Subject, "Could not access content (possibly protected)."
-            GoTo NextSelectedItem
+        
+        ' 1. Build filenames
+        tmpMht = GetUniqueTempMHT(mailItem, ".mht")
+        baseName = Format(ItemDate(mailItem), "yyyymmdd-hhnnss") & " – " & CleanFile(mailItem.Subject)
+        
+        ' ... add path length check here ...
+        If Len(tgtFolder & baseName & ".pdf") >= MAX_PATH Then
+            Dim room As Long
+            room = MAX_PATH - Len(tgtFolder) - Len(".pdf") - 1 ' -1 for safety
+            baseName = Left$(baseName, room)
         End If
-        On Error GoTo ErrorHandler
+        pdfFile = tgtFolder & baseName & ".pdf"
+        ' Note: This version does not check for existing files and will overwrite them.
 
-        'FIX: Call header routine unconditionally to ensure it's always added.
-        'The routine itself now contains a guard against duplicate headers.
+        ' 2. Save to MHT
+        mailItem.SaveAs tmpMht, olMHTML
+        If Err.Number <> 0 Then
+            Err.Clear
+            LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHT (IRM protected or locked)."
+            skipped = skipped + 1
+            GoTo NextItem
+        End If
+        
+        ' 3. Open in Word, process, and export
+        Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+        If Err.Number <> 0 Then
+             Err.Clear
+             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
+             skipped = skipped + 1
+             GoTo NextItem
+        End If
+        
+        ' The helper functions are available from the original code
         Call InjectFullHeader(doc, mailItem)
-
-        'FIX: Call the content stripper to remove quoted replies from the body.
         Call TrimQuotedContent(doc)
-
-        ' *** START: HARDENED FILENAME AND EXPORT BLOCK (UPDATED) ***
-        Dim safeSubj As String, datePrefix As String, baseName As String
-        Const MAX_PATH As Long = 259 ' Windows API limit
-        safeSubj = CleanFile(mailItem.Subject)
-        datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
-        baseName = datePrefix & " – " & safeSubj
         
-        ' 1. Stricter path length check to prevent export errors, allowing space for suffix like _123.pdf
-        If Len(tgtFolder & baseName & "_999.pdf") >= MAX_PATH Then
-            baseName = Left$(baseName, MAX_PATH - Len(tgtFolder) - 10)
-        End If
-
-        ' <<< UPDATE 3: Guarantee unique path with dictionary
-        If usedNames.Exists(baseName) Then
-            usedNames(baseName) = usedNames(baseName) + 1
-        Else
-            usedNames.Add baseName, 0
-        End If
-        pdfFile = tgtFolder & baseName & _
-                  IIf(usedNames(baseName) = 0, "", "_" & usedNames(baseName)) & ".pdf"
-
-        ' <<< UPDATE 2: Robust PDF export with MHT fallback
-        On Error Resume Next ' Catch any final, unexpected export errors
+        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
-        ' Attempt direct export first
-        doc.ExportAsFixedFormat _
-            OutputFileName:=pdfFile, _
-            ExportFormat:=wdExportFormatPDF, _
-            OptimizeFor:=wdExportOptimizeForPrint, _
-            KeepIRM:=False, _
-            BitmapMissingFonts:=True, _
-            CreateBookmarks:=wdExportCreateNoBookmarks
-        
-        '===== inside the main loop, just after the FIRST ExportAsFixedFormat ===
-        If Err.Number = 0 Then Err.Clear     ' <-- NEW -- wipe any stale error
-            
+        ' ... update counters (done/skipped) ...
         If Err.Number <> 0 Then
-            Err.Clear
-            ' Fallback: Save as MHT and re-open in Word
-            tmpMht = GetUniqueTempMHT(mailItem, ".mht")
-            mailItem.SaveAs tmpMht, olMHTML
-            
-            Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
-            Call TrimQuotedContent(doc) 'strip again for good measure
-            
-            ' Re-try the export
-            doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
-            
-            doc.Close False
-            fso.DeleteFile tmpMht, True
-        End If
-
-        ' Now, check the final result of the export attempt (either original or fallback)
-        If Err.Number <> 0 Then
+            LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
             skipped = skipped + 1
-            LogSkippedItem logFilePath, mailItem.Subject, "Export failed after MHT fallback (Error " & Err.Number & ": " & Err.Description & ")"
             Err.Clear
         Else
             done = done + 1
         End If
-        
-        On Error GoTo ErrorHandler
-        ' *** END: HARDENED FILENAME AND EXPORT BLOCK ***
 
-        mailItem.Close olDiscard
-        Set doc = Nothing
+' ================================================================================
+' === CRITICAL FIX: The cleanup block for EACH loop iteration                  ===
+' ================================================================================
+NextItem:
+        ' The CORRECT cleanup order: child objects first, then parents.
+        If Not doc Is Nothing Then
+            doc.Close False ' Close the Word doc without saving changes
+            Set doc = Nothing
+        End If
         
-        If showProgress Then wrd.StatusBar = "Processing mail " & (done + skipped) & " of " & total & "..."
+        ' The MHT file is no longer tied to an inspector, so we just delete it
+        If Len(tmpMht) > 0 And fso.FileExists(tmpMht) Then
+            fso.DeleteFile tmpMht, True
+        End If
 
-NextSelectedItem:
-    Next mailItemVariant
+        ' Release the mail item object for this loop
+        Set mailItem = Nothing
+        tmpMht = "" ' Clear the temp file path
+    Next item
 
     ' --- FINAL CLEANUP ---
-    If showProgress Then wrd.StatusBar = False
     Dim msg As String
-    msg = done & " mail(s) saved as PDF to " & tgtFolder
+    msg = done & " mail(s) successfully saved as PDF to " & vbCrLf & tgtFolder
     If skipped > 0 Then
-        msg = msg & vbCrLf & vbCrLf & skipped & " item(s) were skipped. See the log file for details."
+        msg = msg & vbCrLf & vbCrLf & skipped & " item(s) were skipped. See the log file for details:" & vbCrLf & logFilePath
     End If
-    MsgBox msg, vbInformation
+    MsgBox msg, vbInformation, "Export Complete"
 
 Cleanup:
+    Application.StatusBar = False
     On Error Resume Next
-    '===== at the very end, in Cleanup  ====================================
-    wrd.ScreenUpdating = True            ' <-- NEW -- always restore it
     If Not wrd Is Nothing Then wrd.Quit
-    Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
-    Set fso = Nothing: Set sel = Nothing
-    Set mailItem = Nothing
-    Set usedNames = Nothing ' <<< UPDATE 3: Clean up dictionary
+    ' ... release all other objects ...
+    Set wrd = Nothing: Set fso = Nothing: Set sel = Nothing
+    Set doc = Nothing: Set mailItem = Nothing: Set objWord = Nothing
     Exit Sub
 
 ErrorHandler:
-    MsgBox "A critical error occurred." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, vbCritical, "Macro Error"
+    MsgBox "A critical error occurred: " & Err.Description, vbCritical, "Macro Error"
     GoTo Cleanup
 End Sub
