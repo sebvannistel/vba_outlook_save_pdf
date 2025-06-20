@@ -460,6 +460,20 @@ Private Function CleanFile(s As String) As String
     CleanFile = Trim$(s)
 End Function
 
+'--- HELPER: Injects a simple header that looks like Outlook's print style ---
+Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
+    On Error Resume Next ' In case a property is not available
+    Dim hdr As String
+    hdr = "From: " & m.SenderName & vbCrLf & _
+          "Sent: " & m.SentOn & vbCrLf & _
+          "To: " & m.To & vbCrLf & _
+          IIf(Len(m.CC) > 0, "Cc: " & m.CC & vbCrLf, "") & _
+          "Subject: " & m.Subject & vbCrLf & _
+          String(60, "—") & vbCrLf & vbCrLf
+    doc.Range.InsertBefore hdr
+    On Error GoTo 0
+End Sub
+
 ' *** NEW FUNCTION: Logs skipped items to a text file for review. ***
 Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String, ByVal reason As String)
     If Len(logPath) > 0 Then
@@ -627,88 +641,48 @@ Sub SaveMails_ToPDF_Background()
     If showProgress Then wrd.StatusBar = "Preparing to save " & total & " top-level mail(s)..."
 
     '================================================================================
-    '--- MAIN EXPORT LOOP (FIX #2: Use a safe Variant loop) ---
+    '--- MAIN EXPORT LOOP (Using hidden Inspector for clean PDFs) ---
     '================================================================================
-    Dim miAsVariant As Variant
-    Dim mailItem As Outlook.MailItem
-    
-    For Each miAsVariant In convDict.Items
-        ' Check if the item from the dictionary is a valid MailItem object
-        If TypeOf miAsVariant Is Outlook.MailItem Then
-            Set mailItem = miAsVariant ' Safe to assign now
-            
-            ' --- Safety checks ---
-            If mailItem.Class <> olMail Then LogSkippedItem logFilePath, mailItem.Subject, "Not a true MailItem": GoTo NextItemInLoop
-            If mailItem.Size = 0 Then LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0": GoTo NextItemInLoop
-            If mailItem.Permission <> olUnrestricted Then LogSkippedItem logFilePath, mailItem.Subject, "Item is IRM Protected": GoTo NextItemInLoop
+    Dim mailItem As Object ' Use Object for safety with dictionary items
 
-            ' PATCH: Use nested If to prevent "Array index out of bounds" error
-            If mailItem.Attachments.Count = 1 Then
-                If LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then
-                    LogSkippedItem logFilePath, mailItem.Subject, "S/MIME Encrypted"
-                    GoTo NextItemInLoop
-                End If
-            End If
+    For Each mailItem In convDict.Items
 
-            ' --- 1. FILENAME BUILDER ---
-            Dim safeSubj As String, datePrefix As String, room As Long, roomForTmp As Long, roomForPdf As Long
-            Const cMAX_PATH As Long = 260
-            safeSubj = CleanFile(mailItem.Subject)
-            datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
-            roomForTmp = (cMAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
-            roomForPdf = (cMAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
-            If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
-            If room < 10 Then room = 10
-            If Len(safeSubj) > room Then safeSubj = Left$(safeSubj, room)
-            tmpFile = GetUniqueTempMHT(mailItem, tmpExt)
-            pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
+        ' Skip anything that isn’t a mail item (safety check)
+        If Not TypeOf mailItem Is Outlook.MailItem Then GoTo NextItem
+        If mailItem.Class <> olMail Then GoTo NextItem
 
-            ' --- 2. SAVE AS MHT (with MSG fallback) ---
-            On Error Resume Next
-            mailItem.SaveAs tmpFile, olMHTML
-            If Err.Number <> 0 Then
-                Err.Clear
-                LogSkippedItem logFilePath, mailItem.Subject, "MHTML save failed, falling back to .MSG"
-                Dim msgFallbackFile As String
-                msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
-                If fso.FileExists(msgFallbackFile) Then fso.DeleteFile msgFallbackFile, True
-                mailItem.SaveAs msgFallbackFile, 9 ' olMSGUnicode
-                GoTo NextItemInLoop
-            End If
-            On Error GoTo 0
-            
-            ' --- 3. OPEN IN WORD & PREPARE ---
-            Set doc = Nothing
-            On Error Resume Next
-            Set doc = wrd.Documents.Open(FileName:=tmpFile, ConfirmConversions:=False, ReadOnly:=True, Visible:=False, Format:=wdOpenFormatWebPages)
-            On Error GoTo 0
-            If doc Is Nothing Then LogSkippedItem logFilePath, mailItem.Subject, "Word could not open MHT": GoTo NextItemInLoop
+        ' 1. Open the item in a hidden Inspector to get the "clean" view
+        mailItem.Display False  ' False = modalless + invisible
+        Dim doc As Object
+        Set doc = mailItem.GetInspector.WordEditor ' This gets the current view only
 
-            ' --- Inject Header ---
-            Dim hdr As String
-            hdr = "From:    " & mailItem.SenderName & vbCrLf & "Sent:    " & mailItem.SentOn & vbCrLf & "To:      " & mailItem.To & vbCrLf & "CC:      " & mailItem.CC & vbCrLf & "BCC:     " & mailItem.BCC & vbCrLf & "Subject: " & mailItem.Subject & vbCrLf & String(60, "—") & vbCrLf & vbCrLf
-            If InStr(1, doc.Range(0, 50).Text, "From:") = 0 Then doc.Range.InsertBefore hdr
+        ' 2. Inject a printable header (optional but recommended)
+        Call InjectSimpleHeader(doc, mailItem)
 
-            '================================================================================
-            '--- LAYER 2: QUOTED TEXT REMOVAL (Using the new, corrected function) ---
-            '================================================================================
-            Call TrimQuotedContent(doc)
-            
-            ' --- 4. EXPORT TO PDF & CLEANUP ---
-            If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
-            doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=wdExportOptimizeForPrint ' <-- PATCH 2: APPLIED
-            doc.Close False
-            Set doc = Nothing
-            fso.DeleteFile tmpFile
-            
-            done = done + 1
-            If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
+        ' 3. Build filename and export straight to PDF
+        Dim pdfFile As String
+        Dim safeSubj As String, datePrefix As String
+        safeSubj = CleanFile(mailItem.Subject)
+        datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
+        pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
+        
+        ' Enforce path length limit
+        If Len(pdfFile) >= 260 Then
+            pdfFile = Left$(pdfFile, 255) & ".pdf"
+        End If
 
-        End If ' End of "If TypeOf miAsVariant Is Outlook.MailItem"
+        If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
+        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
 
-NextItemInLoop:
-        If Not doc Is Nothing Then doc.Close False
-    Next miAsVariant
+        ' 4. Close the mail item without saving changes to it
+        mailItem.Close olDiscard
+        Set doc = Nothing
+        
+        done = done + 1
+        If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
+
+NextItem:
+    Next mailItem
 
     ' --- FINAL CLEANUP ---
     If showProgress Then wrd.StatusBar = False
