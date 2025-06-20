@@ -198,19 +198,25 @@ Private Function StripQuotedBody(mi As Outlook.MailItem) As String
     html = mi.HTMLBody
     If Len(html) = 0 Then Exit Function   'nothing to do
 
+    '--- build a pattern list without inline modifiers ------------------
+    Dim pat$
+    pat = "(<div[^>]*outlookmessageheader[^>]*>)|" & _
+          "(<div[^>]*gmail_quote[^>]*>)|" & _
+          "(<div[^>]*gmail_attr[^>]*>)|" & _
+          "(<hr\b)|" & _
+          "(--+\s*Original Message\s*--+)|" & _
+          "(--+\s*Forwarded message\s*--+)|" & _
+          "(^\s*On .+ wrote:)|" & _          'EN
+          "(^\s*Von: .+Gesendet:)|" & _      'DE
+          "(^\s*Le .+ a écrit :)"            'FR
+
     Set re = CreateObject("VBScript.RegExp")
-    re.Global = False
-    re.IgnoreCase = True
-    re.MultiLine = False
-    re.Pattern = "(?s)" & _                       'single-line mode
-                "(<div[^>]*class=""(?:outlookmessageheader|gmail_quote|gmail_attr)""[^>]*>)|" & _
-                "(<hr[^>]*>)|" & _
-                "(<!--\s*StartFragment\s*-->)|" & _
-                "(-----\s*Original Message\s*-----)|" & _
-                "(----\s*Forwarded message\s*----)|" & _
-                "(?m)^\s*On .+ wrote:|" & _        'plain EN
-                "(?m)^\s*Von: .+Gesendet:|" & _    'plain DE
-                "(?m)^\s*Le .+ a écrit :"          'plain FR
+    With re
+        .Pattern = pat
+        .Global = False
+        .IgnoreCase = True
+        .MultiLine = True          'makes ^/$ work across all lines
+    End With
 
     If re.Test(html) Then
         Set m = re.Execute(html)(0)
@@ -236,11 +242,12 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     Dim pat As Variant
     Dim firstSeparatorPos As Long
     
-    ' FIX #2: Add new pattern for OWA/Gmail quotes
+    ' UPDATED patterns array as per your request
     patterns = Array( _
         "[-]{5,}Original Message[-]{5,}", _
         "From:*Sent:*To:*Subject:*", _
-        "<div class=3D""gmail_quote"">", _
+        "<div class=3D""gmail_quote""[^>]*>", _
+        "<div class=3D""outlookmessageheader""[^>]*>", _
         "[<]hr[!>]*[>]", _
         "<blockquote*>" _
     )
