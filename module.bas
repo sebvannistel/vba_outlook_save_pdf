@@ -602,7 +602,7 @@ Sub SaveAsPDFfile()
     '================================================================================
     '--- MAIN EXPORT LOOP ---
     '================================================================================
-    Dim item As Object
+    Dim item As Variant
     Dim progressCounter As Long
     
     ' *** UPDATED: Set status bar only if Explorer is active and property exists ***
