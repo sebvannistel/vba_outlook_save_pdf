@@ -618,32 +618,27 @@ Sub SaveMails_ToPDF_Background()
         Exit Sub
     End If
 
-    ' --- START: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP ---
+    ' --- START: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP (APPLIED FIXES) ---
     For Each itm In sel
         If TypeOf itm Is Outlook.MailItem Then
-            ' Attempt to get the ConversationID. Some items might not have one.
+            
+            ' FIX 2b: Safer pattern to get a key, avoiding empty Variants
+            Dim convID As String
             On Error Resume Next
-            key = itm.ConversationID
-            If Err.Number <> 0 Or Len(key) = 0 Then
-                ' Fallback to a unique key if ConversationID is not available
-                Err.Clear
-                key = itm.EntryID
-            End If
+            convID = itm.ConversationID
             On Error GoTo 0
-
-            ' Now, correctly add or update the dictionary entry for this key.
-            ' This prevents adding Nothing/null values that cause error 424 later.
+            If Len(convID) = 0 Then convID = itm.EntryID
+            key = convID
+            
+            ' FIX 2a: Robust insert to avoid adding Nothing to the dictionary.
+            ' Using Set for the insert branch prevents adding a Nothing value,
+            ' which was the cause of the downstream error 424.
             If Not convDict.Exists(key) Then
-                ' This is a new key, so use the Add method.
-                convDict.Add key, itm
-            Else
-                ' The key already exists; check if this email is newer.
-                If itm.ReceivedTime > convDict(key).ReceivedTime Then
-                    ' This email is newer, so update the value for the existing key.
-                    ' Use Set when assigning objects in a Dictionary
-                    Set convDict(key) = itm
-                End If
+                If Not itm Is Nothing Then Set convDict(key) = itm
+            ElseIf itm.ReceivedTime > convDict(key).ReceivedTime Then
+                Set convDict(key) = itm
             End If
+            
         End If
     Next itm
     ' --- END: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP ---
@@ -656,6 +651,16 @@ Sub SaveMails_ToPDF_Background()
     '--- MAIN EXPORT LOOP (Using hidden Inspector for clean PDFs) ---
     '================================================================================
     Dim mailItem As Object ' Use Object for safety with dictionary items
+
+    ' --- START: ADDED DIAGNOSTIC PROBE (per instruction 1) ---
+    Dim k As Variant
+    For Each k In convDict.Keys
+        If Not IsObject(convDict(k)) Or convDict(k) Is Nothing Then
+            Debug.Print "BAD  →  key=" & k & "  type=" & TypeName(convDict(k))
+        End If
+    Next k
+    Stop            '←  hit Ctrl-G to read Debug window
+    ' --- END: ADDED DIAGNOSTIC PROBE ---
 
     For Each mailItem In convDict.Items
 
