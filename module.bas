@@ -127,12 +127,10 @@ Sub SaveAsPDFfile()
 
     Dim oSelection As Outlook.Selection
     Dim oMail As Outlook.MailItem
-    Dim objFso As Object
-    Set objFso = CreateObject("Scripting.FileSystemObject")
 
     ' Use late-bindings
     Dim objDoc As Object
-    Dim oRegEx As Object
+    Dim objFSO As Object
 
     Dim dlgSaveAs As FileDialog
     Dim objFDFS As FileDialogFilters
@@ -140,10 +138,12 @@ Sub SaveAsPDFfile()
     Dim I As Integer, wSelectedeMails As Integer
     Dim sFileName As String
     Dim sTempFolder As String, sTempFileName As String
-    Dim sTargetFolder As String, strCurrentFile As String
+    Dim sTargetFolder As String
 
     Dim bContinue As Boolean
     Dim bAskForFileName As Boolean
+    Dim done As Object
+    Set done = CreateObject("Scripting.Dictionary")
 
     ' Get all selected items
     Set oSelection = Application.ActiveExplorer.Selection
@@ -243,10 +243,6 @@ Sub SaveAsPDFfile()
     ' ----------------------------------------------------
     ' We are ready to start
     ' Process every selected emails; one by one
-    On Error Resume Next
-
-    Dim done As Object
-    Set done = CreateObject("Scripting.Dictionary")
 
     For I = 1 To wSelectedeMails
 
@@ -288,12 +284,14 @@ Sub SaveAsPDFfile()
                 Debug.Print "Save " & sFileName
 
                 ' Save as pdf
+                On Error Resume Next
                 objDoc.ExportAsFixedFormat OutputFileName:=sFileName, _
                     ExportFormat:=wdExportFormatPDF, OpenAfterExport:=False, OptimizeFor:= _
                     wdExportOptimizeForPrint, Range:=wdExportAllDocument, From:=0, To:=0, _
                     Item:=wdExportDocumentContent, IncludeDocProps:=True, KeepIRM:=True, _
                     CreateBookmarks:=wdExportCreateNoBookmarks, DocStructureTags:=True, _
                     BitmapMissingFonts:=True, UseISO19005_1:=False
+                On Error GoTo 0
 
                 ' And close once saved on disk
                 objDoc.Close (False)
@@ -320,7 +318,6 @@ Sub SaveAsPDFfile()
     Set oMail = Nothing
     Set objDoc = Nothing
     Set objWord = Nothing
-    Set oRegEx = Nothing
 
     MsgBox "Done, mails have been exported to " & sTargetFolder, vbInformation
 
