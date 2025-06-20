@@ -470,6 +470,24 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.mailItem)
     On Error GoTo 0
 End Sub
 
+'--- NEW HELPER (AS PER FIX): Injects a full header with a duplicate guard ---
+Private Sub InjectFullHeader(doc As Object, m As Outlook.mailItem)
+    On Error Resume Next ' In case a property is not available
+    Dim hdr As String
+    hdr = "From: " & m.SenderName & vbCrLf & _
+          "Sent: " & m.SentOn & vbCrLf & _
+          "To: " & m.To & vbCrLf & _
+          IIf(Len(m.CC) > 0, "Cc: " & m.CC & vbCrLf, "") & _
+          "Subject: " & m.Subject & vbCrLf & _
+          String(60, "—") & vbCrLf & vbCrLf
+          
+    ' Per fix, only insert header if one doesn't already exist
+    If InStr(1, doc.Range(0, 60).Text, "From:") = 0 Then
+        doc.Range.InsertBefore hdr
+    End If
+    On Error GoTo 0
+End Sub
+
 ' *** NEW FUNCTION: Logs skipped items to a text file for review. ***
 Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String, ByVal reason As String)
     If Len(logPath) > 0 Then
@@ -595,54 +613,14 @@ Sub SaveMails_ToPDF_Background()
     Set fso = CreateObject("Scripting.FileSystemObject")
 
     '================================================================================
-    '--- LAYER 1: PRE-FILTER SELECTION ---
+    '--- NO PRE-FILTERING: Iterate through all selected items ---
     '================================================================================
-    Dim convDict As Object
-    Dim itm As Object, key As String, existingItem As Object, isNewer As Boolean
-
-    Set convDict = CreateObject("Scripting.Dictionary")
-    If convDict Is Nothing Then
-        MsgBox "Critical Error: Could not create 'Scripting.Dictionary'.", vbCritical
-        GoTo Cleanup
-    End If
-
-    For Each itm In sel
-        If TypeOf itm Is Outlook.MailItem Then
-            On Error Resume Next
-            key = itm.ConversationID
-            If Err.Number <> 0 Or Len(key) = 0 Then
-                Err.Clear
-                key = itm.EntryID
-            End If
-            If Err.Number <> 0 Or Len(key) = 0 Then
-                Err.Clear
-                GoTo NextSelectionItem
-            End If
-            On Error GoTo ErrorHandler
-
-            If Not convDict.Exists(key) Then
-                convDict.Add key, itm
-            Else
-                Set existingItem = convDict(key)
-                isNewer = False
-                On Error Resume Next
-                isNewer = (itm.ReceivedTime > existingItem.ReceivedTime)
-                If Err.Number <> 0 Then
-                    isNewer = False
-                    Err.Clear
-                End If
-                On Error GoTo ErrorHandler
-                If isNewer Then
-                    Set convDict(key) = itm
-                End If
-            End If
-        End If
-NextSelectionItem:
-    Next itm
+    'FIX: The de-duplication dictionary (convDict) has been removed to ensure
+    'every selected item is processed, not just the latest in a conversation.
     
-    total = convDict.Count
+    total = sel.Count ' Process all selected items
     showProgress = (total > 1)
-    If showProgress Then wrd.StatusBar = "Preparing to save " & total & " top-level mail(s)..."
+    If showProgress Then wrd.StatusBar = "Preparing to save " & total & " selected mail(s)..."
 
     '================================================================================
     '--- MAIN EXPORT LOOP ---
@@ -650,14 +628,15 @@ NextSelectionItem:
     Dim mailItemVariant As Variant
     Dim mailItem As Outlook.MailItem
 
-    For Each mailItemVariant In convDict.Items
+    'FIX: Iterate directly over the selection (sel) instead of the de-duped dictionary
+    For Each mailItemVariant In sel
 
         If TypeOf mailItemVariant Is Outlook.MailItem Then
             Set mailItem = mailItemVariant
         Else
             skipped = skipped + 1
             LogSkippedItem logFilePath, "Unknown Item", "Item in collection was not a valid Mail object."
-            GoTo NextDictionaryItem
+            GoTo NextSelectedItem
         End If
         
         On Error Resume Next
@@ -668,11 +647,16 @@ NextSelectionItem:
             mailItem.Close olDiscard
             skipped = skipped + 1
             LogSkippedItem logFilePath, mailItem.Subject, "Could not access content (possibly protected)."
-            GoTo NextDictionaryItem
+            GoTo NextSelectedItem
         End If
         On Error GoTo ErrorHandler
 
-        Call InjectSimpleHeader(doc, mailItem)
+        'FIX: Call header routine unconditionally to ensure it's always added.
+        'The routine itself now contains a guard against duplicate headers.
+        Call InjectFullHeader(doc, mailItem)
+
+        'FIX: Call the content stripper to remove quoted replies from the body.
+        Call TrimQuotedContent(doc)
 
         ' *** START: HARDENED FILENAME AND EXPORT BLOCK ***
         Dim safeSubj As String, datePrefix As String, baseName As String
@@ -716,7 +700,7 @@ NextSelectionItem:
         
         If showProgress Then wrd.StatusBar = "Processing mail " & (done + skipped) & " of " & total & "..."
 
-NextDictionaryItem:
+NextSelectedItem:
     Next mailItemVariant
 
     ' --- FINAL CLEANUP ---
@@ -733,9 +717,7 @@ Cleanup:
     If Not wrd Is Nothing Then wrd.Quit
     Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
     Set fso = Nothing: Set sel = Nothing
-    Set itm = Nothing
-    Set mailItem = Nothing: Set convDict = Nothing
-    Set existingItem = Nothing
+    Set mailItem = Nothing
     Exit Sub
 
 ErrorHandler:
