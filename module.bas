@@ -267,12 +267,19 @@ Sub SaveAsPDFfile()
             ' Open the mht-file in Word without Word visible
             Set objDoc = objWord.Documents.Open(FileName:=sTempFileName, Visible:=False, ReadOnly:=True)
 
-            '---- Build a real unique name ----
-            Dim base As String, try As String, dup As Long
-            base = sTargetFolder & Format(oMail.ReceivedTime, "yyyy-mm-dd_hh-nn-ss") & "_" & _
-                CleanSubject(oMail.Subject)
+            '---- Build a unique, path-safe name ----
+            Const MAX_PATH As Long = 259          'Windows without \\?\
+            Dim base As String, try As String, dup As Long, room As Long
+
+            base = sTargetFolder & _
+                   Format(oMail.ReceivedTime, "yyyy-mm-dd_hh-nn-ss") & "_" & _
+                   CleanSubject(oMail.Subject)
+
+            room = MAX_PATH - Len(sTargetFolder) - 5          '-5 for ".pdf"
+            If Len(base) > room Then base = Left$(base, room)
+
             try = base & ".pdf": dup = 1
-            Do While Len(Dir$(try)) > 0
+            Do While objFSO.FileExists(try)
                 try = base & "_" & dup & ".pdf"
                 dup = dup + 1
             Loop
