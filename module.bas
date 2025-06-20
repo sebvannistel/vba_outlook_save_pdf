@@ -694,7 +694,6 @@ Cleanup:
     On Error Resume Next
     wrd.StatusBar = False                       ' Word
     Application.ActiveExplorer.StatusBar = ""   ' Outlook
-    Application.StatusBar = False
     On Error GoTo 0
 
     On Error Resume Next
