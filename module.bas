@@ -198,25 +198,20 @@ Private Function StripQuotedBody(mi As Outlook.MailItem) As String
     html = mi.HTMLBody
     If Len(html) = 0 Then Exit Function   'nothing to do
 
-    '--- build a pattern list without inline modifiers ------------------
-    Dim pat$
-    pat = "(<div[^>]*outlookmessageheader[^>]*>)|" & _
-          "(<div[^>]*gmail_quote[^>]*>)|" & _
-          "(<div[^>]*gmail_attr[^>]*>)|" & _
-          "(<hr\b)|" & _
-          "(--+\s*Original Message\s*--+)|" & _
-          "(--+\s*Forwarded message\s*--+)|" & _
-          "(^\s*On .+ wrote:)|" & _          'EN
-          "(^\s*Von: .+Gesendet:)|" & _      'DE
-          "(^\s*Le .+ a écrit :)"            'FR
-
     Set re = CreateObject("VBScript.RegExp")
-    With re
-        .Pattern = pat
-        .Global = False
-        .IgnoreCase = True
-        .MultiLine = True          'makes ^/$ work across all lines
-    End With
+    re.Global = False
+    re.IgnoreCase = True
+    re.MultiLine = False ' This should be True to handle multiline anchors like `^On...wrote:`
+    re.MultiLine = True ' Correcting based on pattern usage
+    re.Pattern = "(?s)" & _                       'single-line mode
+                "(<div[^>]*class=""(?:outlookmessageheader|gmail_quote|gmail_attr)""[^>]*>)|" & _
+                "(<hr[^>]*>)|" & _
+                "(<!--\s*StartFragment\s*-->)|" & _
+                "(-----\s*Original Message\s*-----)|" & _
+                "(----\s*Forwarded message\s*----)|" & _
+                "(?m)^\s*On .+ wrote:|" & _        'plain EN
+                "(?m)^\s*Von: .+Gesendet:|" & _    'plain DE
+                "(?m)^\s*Le .+ a écrit :"          'plain FR
 
     If re.Test(html) Then
         Set m = re.Execute(html)(0)
@@ -242,12 +237,11 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     Dim pat As Variant
     Dim firstSeparatorPos As Long
     
-    ' UPDATED patterns array as per your request
+    ' FIX #2: Add new pattern for OWA/Gmail quotes
     patterns = Array( _
         "[-]{5,}Original Message[-]{5,}", _
         "From:*Sent:*To:*Subject:*", _
-        "<div class=3D""gmail_quote""[^>]*>", _
-        "<div class=3D""outlookmessageheader""[^>]*>", _
+        "<div class=3D""gmail_quote"">", _
         "[<]hr[!>]*[>]", _
         "<blockquote*>" _
     )
@@ -428,12 +422,20 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
 
-        '🟢 NEW – cut the quoted thread BEFORE saving the .mht
+        ' --- PATCH START: SAFETY & PLAIN-TEXT HANDLING ---
+        ' High-Impact Fix #1: Backup the original HTMLBody to prevent modification.
+        Dim bak$
+        bak = mailItem.HTMLBody
+        
+        ' Strip the quoted content from a copy for the export process.
         mailItem.HTMLBody = StripQuotedBody(mailItem)
-        'Fallback to plain-text bodies
+        
+        ' High-Impact Fix #2: Safe fallback for plain-text mails without a reply header.
         If Len(mailItem.HTMLBody) = 0 Then
-            mailItem.Body = Split(mailItem.Body, vbCrLf & vbCrLf & "-----")(0)
+            Dim parts: parts = Split(mailItem.Body, "-----")
+            mailItem.Body = parts(0)
         End If
+        ' --- PATCH END: SAFETY & PLAIN-TEXT HANDLING ---
 
         Dim tmpMht As String, pdfFile As String, baseName As String
         On Error Resume Next
@@ -480,8 +482,12 @@ Sub SaveAsPDFfile()
              GoTo NextItem
         End If
 
-1010:   Call InjectFullHeader(doc, mailItem)
-1020:   Call TrimQuotedContent(doc)
+        ' --- PATCH START: CORRECT CALL ORDER ---
+        ' High-Impact Fix #3: Trim quoted content BEFORE injecting the header.
+1010:   Call TrimQuotedContent(doc)
+1020:   Call InjectFullHeader(doc, mailItem)
+        ' --- PATCH END: CORRECT CALL ORDER ---
+        
 1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
@@ -491,6 +497,11 @@ Sub SaveAsPDFfile()
         Else
             done = done + 1
         End If
+
+        ' --- PATCH START: RESTORE ORIGINAL ITEM ---
+        ' High-Impact Fix #1 (Part 2): Restore the original body to the mail item.
+        mailItem.HTMLBody = bak
+        ' --- PATCH END: RESTORE ORIGINAL ITEM ---
 
 NextItem:
         ' Per-item cleanup
