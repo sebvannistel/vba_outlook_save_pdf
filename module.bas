@@ -24,9 +24,6 @@ Option Explicit
 
 Private Const wdExportFormatPDF As Long = 17     'moved to module level
 Private Const olMHTML As Long = 10               'Added for late-binding
-Private Const olMSG As Long = 3                  'Added for late-binding
-Private Const olUnrestricted As Long = 0         'NEW: For version-independent IRM/RMS check
-Private Const wdOpenFormatWebPages As Long = 7
 
 Private objWord As Object
 
@@ -459,7 +456,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     patterns = Array( _
         "[-]{5,}Original Message[-]{5,}", _
         "From:*Sent:*To:*Subject:*", _
-        "<div class=3D""?gmail_quote""?>", _
+        "<div class=3D""gmail_quote"">", _
         "[<]hr[!>]*[>]", _
         "<blockquote*>" _
     )
@@ -544,15 +541,7 @@ Sub SaveAsPDFfile()
     ' FIX #1: Pick only the latest item before you open Word
     '-----------------------------------------------------------------
     ' PASS 1 – keep just the newest item per conversation
-    Dim latest As Object
-    Set latest = CreateObject("Scripting.Dictionary")
-
-    '--- HARD-GUARD: bail out if dictionary not built ---
-    If latest Is Nothing Then
-        MsgBox "Dictionary object could not be created – Scripting Runtime missing.", vbCritical
-        Exit Sub
-    End If
-    
+    Dim latest As Object: Set latest = CreateObject("Scripting.Dictionary")
     Dim k As String, it As Object
 
     For Each it In sel
@@ -614,14 +603,8 @@ Sub SaveAsPDFfile()
         On Error GoTo 0
     End If
 
-    ' <<< NEW GUARD INSERTED HERE >>>
-    If Not (TypeName(latest) = "Dictionary") Then
-        MsgBox "Internal error – variable <latest> is no longer a dictionary.", vbCritical
-        Exit Sub
-    End If
-
     ' FIX #1: Iterate over the filtered dictionary items, not the original selection
-    For Each item In latest.Items   ' <-- safe now
+    For Each item In latest.Items
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
         
@@ -676,7 +659,7 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
         
-1000 Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+1000: Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
         If Err.Number <> 0 Then
              Err.Clear
              LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
@@ -684,9 +667,9 @@ Sub SaveAsPDFfile()
              GoTo NextItem
         End If
 
-1010 Call InjectFullHeader(doc, mailItem)
-1020 Call TrimQuotedContent(doc)
-1030 doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+1010: Call InjectFullHeader(doc, mailItem)
+1020: Call TrimQuotedContent(doc)
+1030: doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
