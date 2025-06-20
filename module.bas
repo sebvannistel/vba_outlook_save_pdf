@@ -659,17 +659,17 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
         
-        Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+1000 Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
         If Err.Number <> 0 Then
              Err.Clear
              LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
              skipped = skipped + 1
              GoTo NextItem
         End If
-        
-        Call InjectFullHeader(doc, mailItem)
-        Call TrimQuotedContent(doc)
-        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+
+1010 Call InjectFullHeader(doc, mailItem)
+1020 Call TrimQuotedContent(doc)
+1030 doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
