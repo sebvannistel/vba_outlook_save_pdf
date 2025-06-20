@@ -409,6 +409,7 @@ End Function
 Sub SaveMails_ToPDF_Background()
 
     Const tmpExt As String = ".mht"
+    Const olMail As Long = 43 ' Added for late-binding check
 
     Dim sel As Outlook.Selection
     Dim mi  As Object ' Use generic object for the loop to handle non-mail items
@@ -446,6 +447,11 @@ Sub SaveMails_ToPDF_Background()
         If TypeOf mi Is Outlook.MailItem Then
             Set mailItem = mi
 
+            ' --- UPDATE 2.1 & 2.3: Additional guards for item validity ---
+            If mailItem.Class <> olMail Then GoTo NextItemInLoop   'reports, tasks, etc.
+            If mailItem.Size = 0 Then GoTo NextItemInLoop         'header only / not synced
+            If mailItem.IsRestricted Then GoTo NextItemInLoop     'M365 “Record” label or RMS-protected
+
             '--- 1  FIX A: Harden the filename builder to prevent MAX_PATH errors ---
             Const MAX_PATH As Long = 260
             Dim safeSubj As String, datePrefix As String, room As Long
@@ -453,12 +459,14 @@ Sub SaveMails_ToPDF_Background()
 
             ' Sanitize subject line to remove illegal filename characters
             safeSubj = CleanFile(mailItem.Subject)
-            datePrefix = Format(mailItem.ReceivedTime, "yyyymmdd-hhnnss")
+            ' --- UPDATE 2.4: Use ItemDate helper to handle drafts ---
+            datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
 
+            ' --- UPDATE 2.2: Adjust for null terminator (MAX_PATH - 1) ---
             ' Calculate the maximum allowed length for the subject part to avoid
             ' exceeding MAX_PATH for both the temporary and the final PDF file.
-            roomForTmp = MAX_PATH - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
-            roomForPdf = MAX_PATH - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
+            roomForTmp = (MAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
+            roomForPdf = (MAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
 
             ' Use the more restrictive of the two calculated lengths
             If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
@@ -520,6 +528,9 @@ Sub SaveMails_ToPDF_Background()
 NextItemInLoop:
         ' This label is the target for the GoTo statement when an error occurs.
         ' It ensures the loop continues with the next item.
+        ' --- UPDATE 3.1: Clean up Word document object if it exists before next loop ---
+        If Not doc Is Nothing Then doc.Close False
+        Set doc = Nothing
     Next mi
 
     If showProgress Then Application.StatusBar = False
