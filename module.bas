@@ -191,6 +191,53 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
     GetUniqueTempMHT = try
 End Function
 
+' NEW FUNCTION - Strips quoted replies from the HTMLBody BEFORE saving to MHT.
+' This is the primary fix for preventing conversation history in PDFs.
+Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
+    Dim body As String
+    Dim patterns As Variant
+    Dim pat As Variant
+    Dim pos As Long
+    Dim firstSeparatorPos As Long
+    
+    body = mailItem.HTMLBody
+    If Len(body) = 0 Then
+        StripQuotedBody = "" ' Return empty if body is empty
+        Exit Function
+    End If
+    
+    ' These patterns identify the start of a replied/forwarded message.
+    ' The function finds the EARLIEST match and trims from that point onwards.
+    ' This array can be extended with other language-specific separators.
+    patterns = Array( _
+        "<div class=""OutlookMessageHeader"">", _
+        "<hr", _
+        "-----Original Message-----", _
+        "<div class=3D""gmail_quote"">", _
+        "<blockquote>" _
+    )
+    
+    ' Using 0 as "not found"
+    firstSeparatorPos = 0
+
+    ' Loop through each pattern to find the one that appears EARLIEST
+    For Each pat In patterns
+        pos = InStr(1, body, CStr(pat), vbTextCompare)
+        If pos > 0 Then
+            If firstSeparatorPos = 0 Or pos < firstSeparatorPos Then
+                firstSeparatorPos = pos
+            End If
+        End If
+    Next pat
+    
+    ' If a separator was found, truncate the string. Otherwise, return the original.
+    If firstSeparatorPos > 0 Then
+        StripQuotedBody = Left(body, firstSeparatorPos - 1)
+    Else
+        StripQuotedBody = body
+    End If
+End Function
+
 '---------------------------------------------------------------------------------------
 ' Procedure : TrimQuotedContent (Version 6 - Robust and Corrected)
 ' Author    : sebvannistel / 2025-06-21
@@ -389,6 +436,13 @@ Sub SaveAsPDFfile()
             skipped = skipped + 1
             LogSkippedItem logFilePath, "Unknown Item Type", "Item in selection was not a mail item."
             GoTo NextItem
+        End If
+
+        '🟢 NEW – cut the quoted thread BEFORE saving the .mht
+        mailItem.HTMLBody = StripQuotedBody(mailItem)
+        'Fallback to plain-text bodies
+        If Len(mailItem.HTMLBody) = 0 Then
+            mailItem.Body = Split(mailItem.Body, vbCrLf & vbCrLf & "-----")(0)
         End If
 
         Dim tmpMht As String, pdfFile As String, baseName As String
