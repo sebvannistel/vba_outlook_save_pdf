@@ -2,10 +2,14 @@
 Private Declare PtrSafe Function SetForegroundWindow _
         Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
 Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
+Private Declare PtrSafe Function FindWindowA Lib "user32" _
+    (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
 #Else
 Private Declare Function SetForegroundWindow _
         Lib "user32" (ByVal hWnd As Long) As Long
 Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
+Private Declare Function FindWindowA Lib "user32" _
+    (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
 #End If
 ' --------------------------------------------------
 '
@@ -52,7 +56,26 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
         .InitialFileName = sTargetFolder
-        SetForegroundWindow objWord.hWnd
+        
+        '--- START: Version-safe method to bring Word to the foreground ---
+        ' The Word.Application object does not have an .Hwnd property.
+        ' We must get the handle from the ActiveWindow or use FindWindow API.
+        Dim wHwnd As LongPtr
+        On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
+        wHwnd = objWord.ActiveWindow.Hwnd ' Word’s real property
+        If Err.Number <> 0 Then           ' If that fails, fall back to API
+            Err.Clear
+            ' Use Win32 FindWindow on the Word application's class name "OpusApp"
+            wHwnd = FindWindowA("OpusApp", vbNullString)
+        End If
+        On Error GoTo 0                   ' Restore normal error trapping
+
+        ' If we successfully got a handle, bring the window to the front.
+        If wHwnd <> 0 Then
+            Call SetForegroundWindow(wHwnd)
+        End If
+        '--- END: Version-safe method ---
+        
         .Show
 
         On Error Resume Next
@@ -94,7 +117,24 @@ Private Function AskForFileName(ByVal sFileName As String) As String
     dlgSaveAs.InitialFileName = sFileName
 
     ' UPDATE 1: Make the Save-As picker topmost as well
-    SetForegroundWindow objWord.Hwnd     'before dlgSaveAs.Show
+    '--- START: Version-safe method to bring Word to the foreground ---
+    ' The Word.Application object does not have an .Hwnd property.
+    ' We must get the handle from the ActiveWindow or use FindWindow API.
+    Dim wHwnd As LongPtr
+    On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
+    wHwnd = objWord.ActiveWindow.Hwnd ' Word’s real property
+    If Err.Number <> 0 Then           ' If that fails, fall back to API
+        Err.Clear
+        ' Use Win32 FindWindow on the Word application's class name "OpusApp"
+        wHwnd = FindWindowA("OpusApp", vbNullString)
+    End If
+    On Error GoTo 0                   ' Restore normal error trapping
+
+    ' If we successfully got a handle, bring the window to the front.
+    If wHwnd <> 0 Then
+        Call SetForegroundWindow(wHwnd)
+    End If
+    '--- END: Version-safe method ---
     
     ' Show the SaveAs dialog and save the message as pdf
     If dlgSaveAs.Show = -1 Then
