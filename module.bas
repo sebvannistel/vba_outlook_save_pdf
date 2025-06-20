@@ -476,8 +476,9 @@ Private Sub InjectFullHeader(doc As Object, m As Outlook.mailItem)
     Dim hdr As String
     hdr = "From: " & m.SenderName & vbCrLf & _
           "Sent: " & m.SentOn & vbCrLf & _
-          "To: " & m.To & vbCrLf & _
-          IIf(Len(m.CC) > 0, "Cc: " & m.CC & vbCrLf, "") & _
+          "To:   " & m.To & vbCrLf & _
+          IIf(Len(m.CC) > 0, "Cc:   " & m.CC & vbCrLf, "") & _
+          IIf(Len(m.BCC) > 0, "Bcc:  " & m.BCC & vbCrLf, "") & _
           "Subject: " & m.Subject & vbCrLf & _
           String(60, "—") & vbCrLf & vbCrLf
           
@@ -589,6 +590,8 @@ Sub SaveMails_ToPDF_Background()
     Dim wrd As Object, doc As Object, fso As Object
     Dim pdfFile As String, tgtFolder As String, logFilePath As String
     Dim total As Long, done As Long, skipped As Long, showProgress As Boolean
+    Dim usedNames As Object ' <<< UPDATE 3: Declare dictionary for unique names
+    Dim tmpMht As String    ' <<< UPDATE 2: Declare variable for temporary MHT file
 
     ' --- INITIALIZE ---
     On Error GoTo ErrorHandler
@@ -611,6 +614,7 @@ Sub SaveMails_ToPDF_Background()
     logFilePath = tgtFolder & "_SkippedItems.log"
     wrd.DisplayAlerts = 0
     Set fso = CreateObject("Scripting.FileSystemObject")
+    Set usedNames = CreateObject("Scripting.Dictionary") ' <<< UPDATE 3: Initialize dictionary
 
     '================================================================================
     '--- NO PRE-FILTERING: Iterate through all selected items ---
@@ -658,25 +662,31 @@ Sub SaveMails_ToPDF_Background()
         'FIX: Call the content stripper to remove quoted replies from the body.
         Call TrimQuotedContent(doc)
 
-        ' *** START: HARDENED FILENAME AND EXPORT BLOCK ***
+        ' *** START: HARDENED FILENAME AND EXPORT BLOCK (UPDATED) ***
         Dim safeSubj As String, datePrefix As String, baseName As String
         Const MAX_PATH As Long = 259 ' Windows API limit
         safeSubj = CleanFile(mailItem.Subject)
         datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
         baseName = datePrefix & " – " & safeSubj
         
-        ' 1. Stricter path length check to prevent the export error
-        If Len(tgtFolder & baseName & ".pdf") >= MAX_PATH Then
-            baseName = Left$(baseName, MAX_PATH - Len(tgtFolder) - 5)
+        ' 1. Stricter path length check to prevent export errors, allowing space for suffix like _123.pdf
+        If Len(tgtFolder & baseName & "_999.pdf") >= MAX_PATH Then
+            baseName = Left$(baseName, MAX_PATH - Len(tgtFolder) - 10)
         End If
-        pdfFile = tgtFolder & baseName & ".pdf"
 
-        ' 2. Ensure we're not overwriting a locked file
-        If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
+        ' <<< UPDATE 3: Guarantee unique path with dictionary
+        If usedNames.Exists(baseName) Then
+            usedNames(baseName) = usedNames(baseName) + 1
+        Else
+            usedNames.Add baseName, 0
+        End If
+        pdfFile = tgtFolder & baseName & _
+                  IIf(usedNames(baseName) = 0, "", "_" & usedNames(baseName)) & ".pdf"
 
+        ' <<< UPDATE 2: Robust PDF export with MHT fallback
         On Error Resume Next ' Catch any final, unexpected export errors
         
-        ' 3. Robust PDF export with parameters to prevent common failures
+        ' Attempt direct export first
         doc.ExportAsFixedFormat _
             OutputFileName:=pdfFile, _
             ExportFormat:=wdExportFormatPDF, _
@@ -686,12 +696,30 @@ Sub SaveMails_ToPDF_Background()
             CreateBookmarks:=wdExportCreateNoBookmarks
             
         If Err.Number <> 0 Then
+            Err.Clear
+            ' Fallback: Save as MHT and re-open in Word
+            tmpMht = GetUniqueTempMHT(mailItem, ".mht")
+            mailItem.SaveAs tmpMht, olMHTML
+            
+            Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+            Call TrimQuotedContent(doc) 'strip again for good measure
+            
+            ' Re-try the export
+            doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+            
+            doc.Close False
+            fso.DeleteFile tmpMht, True
+        End If
+
+        ' Now, check the final result of the export attempt (either original or fallback)
+        If Err.Number <> 0 Then
             skipped = skipped + 1
-            LogSkippedItem logFilePath, mailItem.Subject, "Export failed (Error " & Err.Number & ": " & Err.Description & ")"
+            LogSkippedItem logFilePath, mailItem.Subject, "Export failed after MHT fallback (Error " & Err.Number & ": " & Err.Description & ")"
             Err.Clear
         Else
             done = done + 1
         End If
+        
         On Error GoTo ErrorHandler
         ' *** END: HARDENED FILENAME AND EXPORT BLOCK ***
 
@@ -718,6 +746,7 @@ Cleanup:
     Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
     Set fso = Nothing: Set sel = Nothing
     Set mailItem = Nothing
+    Set usedNames = Nothing ' <<< UPDATE 3: Clean up dictionary
     Exit Sub
 
 ErrorHandler:
