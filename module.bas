@@ -488,67 +488,62 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
 End Function
 
 '---------------------------------------------------------------------------------------
-' Procedure : TrimQuotedContent (Version 5 - Final: Corrected Find Patterns)
+' Procedure : TrimQuotedContent (Version 6 - Robust and Corrected)
 ' Author    : sebvannistel / 2025-06-21
-' Purpose   : Uses Word's Find object with corrected wildcard patterns to robustly
-'             locate and remove reply separators.
-' Argument  : doc - A Word.Document object (passed as a generic Object).
+' Purpose   : Finds the EARLIEST reply separator in the document across multiple
+'             patterns and deletes all content from that point forward.
 '---------------------------------------------------------------------------------------
 Private Sub TrimQuotedContent(ByVal doc As Object)
     On Error Resume Next
     
     Const wdFindContinue As Long = 1
-    Dim rngFound As Object ' Word.Range
+    Dim findRange As Object ' Word.Range
+    Dim patterns As Variant
+    Dim pat As Variant
+    Dim firstSeparatorPos As Long
     
-    With doc.Content.Find
-        .Replacement.Text = ""
-        .Forward = True
-        .Wrap = wdFindContinue
-        .Format = False
-        .MatchCase = False
-        .MatchWildcards = True ' Enable wildcard searches
-
-        ' --- Execute Find for each pattern, using corrected wildcard syntax ---
-        
-        ' Pattern 1: Outlook/Thunderbird Horizontal Rule (<hr...>)
-        ' Use [!>] to match any character except '>' inside the tag.
-        .Text = "[<]hr[!>]*[>]" ' <-- PATCH 1: APPLIED
-        If .Execute = True Then
-            Set rngFound = .Parent
-            doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
-            GoTo Cleanup
-        End If
-        
-        ' Pattern 2: Classic reply line ("-----Original Message-----")
-        ' Use {5,} to match 5 or more hyphens.
-        .Text = "[-]{5,}Original Message[-]{5,}"
-        If .Execute = True Then
-            Set rngFound = .Parent
-            doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
-            GoTo Cleanup
-        End If
-        
-        ' Pattern 3: Gmail/Apple blockquote style
-        .Text = "<blockquote*>"
-        If .Execute = True Then
-            Set rngFound = .Parent
-            doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
-            GoTo Cleanup
-        End If
-        
-        ' Pattern 4: A more generic "From:" header block check as a fallback
-        .Text = "From:*Sent:*To:*Subject:*"
-        If .Execute = True Then
-             If .Parent.Start > 200 Then ' Safety check
-                Set rngFound = .Parent
-                doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
-                GoTo Cleanup
-             End If
-        End If
-    End With
-
-Cleanup:
-    Set rngFound = Nothing
+    ' Define all patterns to search for, from most to least specific
+    patterns = Array( _
+        "[-]{5,}Original Message[-]{5,}", _
+        "From:*Sent:*To:*Subject:*", _
+        "[<]hr[!>]*[>]", _
+        "<blockquote*>" _
+    )
+    
+    firstSeparatorPos = -1 ' Initialize to a "not found" state
+    
+    ' Loop through each pattern to find the one that appears EARLIEST
+    For Each pat In patterns
+        Set findRange = doc.Content
+        With findRange.Find
+            .ClearFormatting
+            .Text = pat
+            .Forward = True
+            .Wrap = wdFindContinue
+            .Format = False
+            .MatchCase = False
+            .MatchWildcards = True
+            
+            If .Execute = True Then
+                ' Safety check: don't trim if the separator is at the very top
+                ' (e.g., the main "From:" line of the original email).
+                If .Parent.Start > 200 Then
+                    ' If this is the first separator found, or if it's earlier
+                    ' than the previous best, record its position.
+                    If firstSeparatorPos = -1 Or .Parent.Start < firstSeparatorPos Then
+                        firstSeparatorPos = .Parent.Start
+                    End If
+                End If
+            End If
+        End With
+    Next pat
+    
+    ' After checking all patterns, if we found a separator, delete from that point.
+    If firstSeparatorPos > -1 Then
+        doc.Range(Start:=firstSeparatorPos, End:=doc.Content.End).Delete
+    End If
+    
+    Set findRange = Nothing
     On Error GoTo 0
 End Sub
 
@@ -646,7 +641,14 @@ Sub SaveMails_ToPDF_Background()
             If mailItem.Class <> olMail Then LogSkippedItem logFilePath, mailItem.Subject, "Not a true MailItem": GoTo NextItemInLoop
             If mailItem.Size = 0 Then LogSkippedItem logFilePath, mailItem.Subject, "Item size is 0": GoTo NextItemInLoop
             If mailItem.Permission <> olUnrestricted Then LogSkippedItem logFilePath, mailItem.Subject, "Item is IRM Protected": GoTo NextItemInLoop
-            If mailItem.Attachments.Count = 1 And LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then LogSkippedItem logFilePath, mailItem.Subject, "S/MIME Encrypted": GoTo NextItemInLoop
+
+            ' PATCH: Use nested If to prevent "Array index out of bounds" error
+            If mailItem.Attachments.Count = 1 Then
+                If LCase$(mailItem.Attachments(1).FileName) Like "*.p7m" Then
+                    LogSkippedItem logFilePath, mailItem.Subject, "S/MIME Encrypted"
+                    GoTo NextItemInLoop
+                End If
+            End If
 
             ' --- 1. FILENAME BUILDER ---
             Dim safeSubj As String, datePrefix As String, room As Long, roomForTmp As Long, roomForPdf As Long
