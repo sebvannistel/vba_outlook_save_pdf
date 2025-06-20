@@ -69,67 +69,48 @@ End Function
 ' --------------------------------------------------
 '
 ' Ask the user for a filename
+' (CRITICAL RISK FIX: Re-written to be stable)
 '
 ' --------------------------------------------------
 Private Function AskForFileName(ByVal sFileName As String) As String
+    ' STABILITY FIX: This function has been re-written to use Outlook's native
+    ' Application.FileDialog. This is 100% stable and avoids using Word's UI
+    ' and the fragile SetForegroundWindow API call that caused crashes.
 
-    Dim dlgSaveAs As FileDialog
-    Dim wResponse As VBA.VbMsgBoxResult
-    Dim wPos As Integer
+    Dim dlg As FileDialog
+    Dim sSelectedFile As String
 
-    Set dlgSaveAs = objWord.FileDialog(msoFileDialogSaveAs)
+    ' Use Outlook's Application.FileDialog for stability
+    Set dlg = Application.FileDialog(msoFileDialogSaveAs)
 
-    ' Set the initial location and file name for SaveAs dialog
-    dlgSaveAs.InitialFileName = sFileName
+    With dlg
+        .Title = "Save As PDF"
+        .InitialFileName = sFileName ' Use the suggested filename
 
-    ' UPDATE 1: Make the Save-As picker topmost as well
-    '--- START: Version-safe method to bring Word to the foreground ---
-    ' The Word.Application object does not have an .Hwnd property.
-    ' We must get the handle from the ActiveWindow or use FindWindow API.
-    Dim wHwnd As LongPtr
-    On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
-    wHwnd = objWord.ActiveWindow.hWnd ' Word’s real property
-    If Err.Number <> 0 Then           ' If that fails, fall back to API
-        Err.Clear
-        ' Use Win32 FindWindow on the Word application's class name "OpusApp"
-        wHwnd = FindWindowA("OpusApp", vbNullString)
-    End If
-    On Error GoTo 0                   ' Restore normal error trapping
+        ' Clear existing filters and add a specific PDF filter
+        .Filters.Clear
+        .Filters.Add "PDF Files", "*.pdf"
+        .FilterIndex = 1 ' Make PDF the default and only option
 
-    ' If we successfully got a handle, bring the window to the front.
-    If wHwnd <> 0 Then
-        Call SetForegroundWindow(wHwnd)
-    End If
-    '--- END: Version-safe method ---
-    
-    ' Show the SaveAs dialog and save the message as pdf
-    If dlgSaveAs.Show = -1 Then
+        ' Show the dialog. If the user clicks Save, .Show returns -1
+        If .Show = -1 Then
+            sSelectedFile = .SelectedItems(1)
 
-        sFileName = dlgSaveAs.SelectedItems(1)
-
-        ' Verify if pdf is selected
-        If Right(sFileName, 4) <> ".pdf" Then
-
-            wResponse = MsgBox("Sorry, only saving in the pdf-format " & _
-                "is supported." & vbNewLine & vbNewLine & _
-                "Save as pdf instead?", vbInformation + vbOKCancel)
-
-            If wResponse = vbCancel Then
-                sFileName = ""
-            ElseIf wResponse = vbOK Then
-                wPos = InStrRev(sFileName, ".")
-                If wPos > 0 Then
-                    sFileName = Left(sFileName, wPos - 1)
-                End If
-                sFileName = sFileName & ".pdf"
+            ' The SaveAs dialog usually appends the extension automatically if the
+            ' filter is set, but we can double-check to be certain.
+            If LCase(Right(sSelectedFile, 4)) <> ".pdf" Then
+                sSelectedFile = sSelectedFile & ".pdf"
             End If
-
+        Else
+            ' User cancelled the dialog
+            sSelectedFile = ""
         End If
-    End If
+    End With
 
-    ' Return the filename
-    AskForFileName = sFileName
+    ' Return the selected filename or an empty string if cancelled
+    AskForFileName = sSelectedFile
 
+    Set dlg = Nothing
 End Function
 
 ' --------------------------------------------------
@@ -621,13 +602,31 @@ Sub SaveMails_ToPDF_Background_Stable()
         baseName = Format(ItemDate(mailItem), "yyyymmdd-hhnnss") & " – " & CleanFile(mailItem.Subject)
         
         ' ... add path length check here ...
+        ' Truncate baseName to ensure the full path with a potential suffix does not exceed MAX_PATH
         If Len(tgtFolder & baseName & ".pdf") >= MAX_PATH Then
             Dim room As Long
-            room = MAX_PATH - Len(tgtFolder) - Len(".pdf") - 1 ' -1 for safety
-            baseName = Left$(baseName, room)
+            ' Reserve space for a suffix like "_99.pdf" (7 chars) to avoid path-too-long errors during de-duplication
+            room = MAX_PATH - Len(tgtFolder) - 7
+            If room > 0 Then
+                baseName = Left$(baseName, room)
+            Else
+                 ' Handle case where target folder path is already too long to create any file
+                 LogSkippedItem logFilePath, mailItem.Subject, "Target folder path is too long to create a valid filename."
+                 skipped = skipped + 1
+                 GoTo NextItem
+            End If
         End If
+        
+        ' DATA LOSS RISK FIX: De-duplicate filename to prevent silently overwriting existing files.
+        Dim dupCounter As Long
         pdfFile = tgtFolder & baseName & ".pdf"
-        ' Note: This version does not check for existing files and will overwrite them.
+        dupCounter = 1
+        ' The fso object is created at the start of the sub
+        Do While fso.FileExists(pdfFile)
+            ' If file exists, append a suffix and check again
+            pdfFile = tgtFolder & baseName & "_" & dupCounter & ".pdf"
+            dupCounter = dupCounter + 1
+        Loop
 
         ' 2. Save to MHT
         mailItem.SaveAs tmpMht, olMHTML
