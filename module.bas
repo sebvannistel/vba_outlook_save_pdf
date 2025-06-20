@@ -14,6 +14,7 @@
 Option Explicit
 
 Private Const cFolder As String = "C:\Mails\"
+Private Const wdExportFormatPDF As Long = 17     'moved to module level
 
 Private objWord As Object
 
@@ -119,7 +120,6 @@ End Function
 ' --------------------------------------------------
 Sub SaveAsPDFfile()
 
-    Const wdExportFormatPDF = 17
     Const wdExportOptimizeForPrint = 0
     Const wdExportAllDocument = 0
     Const wdExportDocumentContent = 0
@@ -364,7 +364,6 @@ End Function
 ' remains untouched.
 Sub SaveSelectedMails_AsPDF_NoPopups()
 
-    Const wdExportFormatPDF = 17
     Const tempExtMHT = ".mht"
 
     Dim sel As Outlook.Selection
@@ -411,6 +410,10 @@ Sub SaveSelectedMails_AsPDF_NoPopups()
 End Sub
 
 Private Function CleanFile(s As String) As String
-    s = Replace(s, ":", " ")
+    Dim badChars As Variant, ch As Variant
+    badChars = Array("\", "/", ":", "*", "?", """", "<", ">", "|")
+    For Each ch In badChars
+        s = Replace$(s, ch, " ")
+    Next ch
     CleanFile = Trim$(s)
 End Function
