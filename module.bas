@@ -138,13 +138,11 @@ Sub SaveAsPDFfile()
     Dim fdf As FileDialogFilter
     Dim I As Integer, wSelectedeMails As Integer
     Dim sFileName As String
-    Dim sTempFolder As String, sTempFileName As String
+    Dim sTempFolder As String
     Dim sTargetFolder As String
 
     Dim bContinue As Boolean
     Dim bAskForFileName As Boolean
-    Dim latest As Object
-    Set latest = CreateObject("Scripting.Dictionary")
 
     ' Get all selected items
     Set oSelection = Application.ActiveExplorer.Selection
@@ -242,118 +240,46 @@ Sub SaveAsPDFfile()
 
     ' ----------------------------------------------------
     ' We are ready to start
-    Dim oItem As Object, k As String
+    For Each oMail In oSelection
 
-    ' Pass 1 – remember only the most recent item per conversation
-    For Each oItem In oSelection
-        'determine the de-duplication key
-        If IsSpecial(oItem) Then
-            k = oItem.EntryID
-        Else
-            On Error Resume Next
-            k = oItem.ConversationID
-            If Err.Number <> 0 Or k = "" Then k = oItem.ConversationTopic
-            On Error GoTo 0
-        End If
+            '## 1  build trimmed HTML and make sure it closes
+            Dim ts As Object, tmp As String
+            tmp = sTempFolder & "\" & objFSO.GetTempName & ".htm"
 
-        'keep only the newest item for this key
-        If Not latest.Exists(k) Then
-            Set latest(k) = oItem
-        ElseIf ItemDate(oItem) > ItemDate(latest(k)) Then
-            Set latest(k) = oItem
-        End If
-    Next
+            Set ts = objFSO.CreateTextFile(tmp, True, True)
+            ts.Write StripQuotedBody(oMail)
+            ts.Close                                      '<<< flushes to disk
 
-    '----------- sort the kept items newest-first -----------------
-    Dim keys() As Variant, k1 As Long, k2 As Long, tmpKey As Variant
-    keys = latest.Keys
-    For k1 = LBound(keys) To UBound(keys) - 1
-        For k2 = k1 + 1 To UBound(keys)
-            If ItemDate(latest(keys(k2))) > ItemDate(latest(keys(k1))) Then
-                tmpKey = keys(k1): keys(k1) = keys(k2): keys(k2) = tmpKey
-            End If
-        Next k2
-    Next k1
+            Set objDoc = objWord.Documents.Open(tmp, False, True)
 
-    '----------- export -------------------------------------------
-    Dim kKey
-    For Each kKey In keys
-        Set oMail = latest(kKey)
+            '## 2  build a unique PDF name (you already had this)
+            Const MAX_PATH As Long = 260
+            Dim base$, try$, dup&, room&
+            base = sTargetFolder & Format(ItemDate(oMail), "yyyymmdd-hhnnss") _
+                   & " – " & CleanSubject(oMail.Subject)
 
-            ' Construct a unique filename for the temp mht-file
-            sTempFileName = sTempFolder & "\" & Replace(objFSO.GetTempName, ".tmp", ".mht")
-
-            ' Delete any previous file with that name (ReadOnly or hidden)
-            If Len(Dir$(sTempFileName, ATTR_ALL)) > 0 Then
-                SetAttr sTempFileName, vbNormal
-                Kill sTempFileName
-            End If
-
-            ' Save the mht-file
-            oMail.SaveAs sTempFileName, olMHTML
-
-            ' Open the mht-file in Word without Word visible
-            Set objDoc = objWord.Documents.Open(FileName:=sTempFileName, Visible:=False, ReadOnly:=True)
-
-            '---- Build a unique, path-safe name ----
-            Const MAX_PATH As Long = 259          'Windows without \\?\
-            Dim base As String, try As String, dup As Long, room As Long
-
-            base = sTargetFolder & _
-                   Format(ItemDate(oMail), "yyyy-mm-dd_hh-nn-ss") & "_" & _
-                   CleanSubject(oMail.Subject)
-
-            room = MAX_PATH - Len(sTargetFolder) - 5          '-5 for ".pdf"
+            room = MAX_PATH - Len(sTargetFolder) - 5
             If Len(base) > room Then base = Left$(base, room)
 
             try = base & ".pdf": dup = 1
             Do While objFSO.FileExists(try)
-                try = base & "_" & dup & ".pdf"
-                dup = dup + 1
+                try = base & "_" & dup & ".pdf": dup = dup + 1
             Loop
-            sFileName = try
-
-            If bAskForFileName Then
-                sFileName = AskForFileName(sFileName)
-            End If
-
+            
+            If bAskForFileName Then sFileName = AskForFileName(try) Else sFileName = try
+            
             If Not (Trim(sFileName) = "") Then
+                
+                '## 3  export
+                objDoc.ExportAsFixedFormat sFileName, wdExportFormatPDF
+                objDoc.Close False
 
-                Debug.Print "Save " & sFileName
-
-                ' Save as pdf
-                On Error Resume Next
-                objDoc.ExportAsFixedFormat OutputFileName:=sFileName, _
-                    ExportFormat:=wdExportFormatPDF, OpenAfterExport:=False, OptimizeFor:= _
-                    wdExportOptimizeForPrint, Range:=wdExportAllDocument, From:=0, To:=0, _
-                    Item:=wdExportDocumentContent, IncludeDocProps:=True, KeepIRM:=True, _
-                    CreateBookmarks:=wdExportCreateNoBookmarks, DocStructureTags:=True, _
-                    BitmapMissingFonts:=True, UseISO19005_1:=False
-                On Error GoTo 0
-
-                ' And close once saved on disk
-                objDoc.Close (False)
-
-                ' Release the document object
-                Set objDoc = Nothing
-
-                '--- ensure temporary file can be deleted --------------------
-                Dim attempt As Integer
-                For attempt = 1 To 3
-                    If objFSO.FileExists(sTempFileName) Then
-                        On Error Resume Next
-                        objFSO.DeleteFile sTempFileName, True
-                        On Error GoTo 0
-                        If Not objFSO.FileExists(sTempFileName) Then Exit For
-                        DoEvents
-                    Else
-                        Exit For
-                    End If
-                Next attempt
+                '## 4  tidy up temp file
+                objFSO.DeleteFile tmp, True
 
             End If
-
-    Next kKey
+            
+    Next oMail
 
     Set dlgSaveAs = Nothing
 
@@ -364,19 +290,6 @@ Sub SaveAsPDFfile()
     On Error Resume Next
     objWord.Quit
     On Error GoTo 0
-
-    '--- delete any remaining temporary file -----------------------
-    If Len(Dir$(sTempFileName, ATTR_ALL)) > 0 Then
-        On Error Resume Next
-        SetAttr sTempFileName, vbNormal
-        Kill sTempFileName
-        On Error GoTo 0
-    End If
-    If objFSO.FileExists(sTempFileName) Then
-        On Error Resume Next
-        objFSO.DeleteFile sTempFileName, True
-        On Error GoTo 0
-    End If
 
     ' Cleanup
 
@@ -410,7 +323,7 @@ Private Function CleanSubject(raw As String) As String
         End With
     End If
 
-    'Guard against NULL subjects  
+    'Guard against NULL subjects
     CleanSubject = Trim$(reBad.Replace(rePfx.Replace(CStr(raw), ""), ""))
 End Function
 
@@ -430,27 +343,16 @@ Private Function ItemDate(itm As Object) As Date
     End Select
 End Function
 
-'--------------------------------------------------
-' Determine whether an email should be treated as a
-' "special" item that always gets its own PDF, even
-' when other mails share the same conversation topic.
-'--------------------------------------------------
-Private Function IsSpecial(itm As Object) As Boolean
-    Dim cls As String: cls = itm.MessageClass
+Function StripQuotedBody(mi As Outlook.MailItem) As String
+    Dim html$, pos&
+    html = mi.HTMLBody
+    If Len(html) = 0 Then html = Replace(mi.Body, vbCrLf, "<br>")
 
-    Select Case True
-        Case cls Like "IPM.Outlook.Recall*"
-        Case cls Like "IPM.Recall.Report*"
-        Case cls Like "REPORT.IPM.*"
-        Case cls Like "IPM.Schedule.Meeting.*"
-        Case cls Like "IPM.Note.Rules.OofTemplate*"
-        Case cls Like "IPM.Note.Rules.ExternalOofTemplate*"
-        Case cls Like "IPM.TaskRequest.*"
-        Case InStr(1, itm.Subject, "Automatic reply:", vbTextCompare) > 0
-        Case Else: GoTo NotSpecial
-    End Select
-    IsSpecial = True
-    Exit Function
-NotSpecial:
-    IsSpecial = False
+    'Common Outlook marker for the reply header
+    pos = InStr(html, "class=""OutlookMessageHeader""")
+    If pos = 0 Then pos = InStr(html, "-----Original Message-----")
+    If pos = 0 Then pos = InStr(html, "<hr")              'fallback
+
+    If pos > 0 Then html = Left$(html, pos - 1) & "</body></html>"
+    StripQuotedBody = html
 End Function
