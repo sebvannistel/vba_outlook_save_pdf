@@ -299,6 +299,12 @@ Private Function ItemDate(itm As Object) As Date
     On Error GoTo 0
 End Function
 
+'--- HELPER for dictionary building. Items that are not standard mail
+'--- (e.g., reports) don't have a ConversationID and are treated uniquely.
+Private Function IsSpecial(itm As Object) As Boolean
+    IsSpecial = Not (TypeOf itm Is Outlook.MailItem)
+End Function
+
 
 ' --------------------------------------------------
 ' Export selected mails as PDFs entirely in the background
@@ -386,8 +392,9 @@ Private Sub InjectFullHeader(doc As Object, m As Outlook.MailItem)
           "Subject: " & m.Subject & vbCrLf & _
           String(60, "—") & vbCrLf & vbCrLf
           
-    ' Per fix, only insert header if one doesn't already exist
-    If InStr(1, doc.Range(0, 60).Text, "From:") = 0 Then
+    ' FIX #3: Guard against double-inserting your own header
+    ' Increased look-ahead from 60 to 120 characters to be safer.
+    If InStr(1, doc.Range(0, 120).Text, "From:") = 0 Then
         doc.Range.InsertBefore hdr
     End If
     On Error GoTo 0
@@ -441,16 +448,18 @@ End Function
 Private Sub TrimQuotedContent(ByVal doc As Object)
     On Error Resume Next
     
-    Const wdFindContinue As Long = 1
+    ' FIX #2: Add wdFindStop constant
+    Const wdFindStop As Long = 0
     Dim findRange As Object ' Word.Range
     Dim patterns As Variant
     Dim pat As Variant
     Dim firstSeparatorPos As Long
     
-    ' Define all patterns to search for, from most to least specific
+    ' FIX #2: Add new pattern for OWA/Gmail quotes
     patterns = Array( _
         "[-]{5,}Original Message[-]{5,}", _
         "From:*Sent:*To:*Subject:*", _
+        "<div class=3D""?gmail_quote""?>", _
         "[<]hr[!>]*[>]", _
         "<blockquote*>" _
     )
@@ -464,7 +473,8 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             .ClearFormatting
             .Text = pat
             .Forward = True
-            .Wrap = wdFindContinue ' Use wdFindStop to prevent wrapping around
+            ' FIX #2: Change Wrap to wdFindStop to prevent finding the last separator
+            .Wrap = wdFindStop
             .Format = False
             .MatchCase = False
             .MatchWildcards = True
@@ -531,7 +541,31 @@ Sub SaveAsPDFfile()
         GoTo Cleanup
     End If
 
-    total = sel.Count
+    ' FIX #1: Pick only the latest item before you open Word
+    '-----------------------------------------------------------------
+    ' PASS 1 – keep just the newest item per conversation
+    Dim latest As Object: Set latest = CreateObject("Scripting.Dictionary")
+    Dim k As String, it As Object
+
+    For Each it In sel
+        If IsSpecial(it) Then                       'NDR, report, etc.
+            k = it.EntryID
+        Else                                        'regular mail
+            On Error Resume Next
+            k = it.ConversationID
+            If Err.Number <> 0 Or k = "" Then k = it.ConversationTopic
+            On Error GoTo 0
+        End If
+
+        If Not latest.Exists(k) Then
+            Set latest(k) = it
+        ElseIf ItemDate(it) > ItemDate(latest(k)) Then
+            Set latest(k) = it                     'replace by newer
+        End If
+    Next it
+    '-----------------------------------------------------------------
+
+    total = latest.Count ' Use the count of the filtered list
 
     ' Step 3: Initialize worker objects
     Set fso = CreateObject("Scripting.FileSystemObject")
@@ -572,7 +606,8 @@ Sub SaveAsPDFfile()
         On Error GoTo 0
     End If
 
-    For Each item In sel
+    ' FIX #1: Iterate over the filtered dictionary items, not the original selection
+    For Each item In latest.Items
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
         
