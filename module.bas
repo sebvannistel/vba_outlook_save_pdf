@@ -487,6 +487,71 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
     GetUniqueTempMHT = try
 End Function
 
+'---------------------------------------------------------------------------------------
+' Procedure : TrimQuotedContent
+' Author    : Your Name/Date
+' Purpose   : Finds common email reply/forward separators in a Word document
+'             and removes the quoted content from that point onwards.
+'             Handles multiple languages and email client formats.
+' Argument  : doc - A Word.Document object (passed as a generic Object).
+'---------------------------------------------------------------------------------------
+Private Sub TrimQuotedContent(ByVal doc As Object)
+    On Error Resume Next ' In case of any unexpected errors with the Word object
+
+    Dim bodyText As String
+    bodyText = doc.Content.Text
+
+    ' --- Define a library of common reply/forward separators ---
+    ' This array can be easily expanded to support more languages or clients.
+    Dim separators As Variant
+    separators = Array( _
+        "-----Original Message-----", _
+        "-----Ursprüngliche Nachricht-----", _
+        "-----Message d'origine-----", _
+        "-----Mensaje original-----", _
+        "-----Oorspronkelijk bericht-----", _
+        "-----Messaggio originale-----", _
+        "-----Forwarded Message-----", _
+        "-----Weitergeleitete Nachricht-----", _
+        "-----Message transféré-----", _
+        "From:", "Von:", "De:", "Da:", _
+        "Sent:", "Gesendet:", "Envoyé:", "Verzonden:" _
+    )
+
+    Dim separator As Variant
+    Dim splitPosition As Long
+    Dim currentPos As Long
+    
+    ' Initialize splitPosition to a value greater than any possible position
+    splitPosition = Len(bodyText) + 1
+
+    ' --- Find the earliest separator in the document ---
+    For Each separator In separators
+        currentPos = InStr(1, bodyText, separator, vbTextCompare)
+        ' If a separator is found and it's earlier than any previous find...
+        If currentPos > 0 And currentPos < splitPosition Then
+            splitPosition = currentPos
+        End If
+    Next separator
+
+    ' --- If a valid separator was found, trim the document ---
+    ' The check "splitPosition <= Len(bodyText)" ensures we found something.
+    ' The check "splitPosition > 500" is a safety guard to prevent trimming
+    ' if a separator (like "From:") is found in the main header we added.
+    If splitPosition <= Len(bodyText) And splitPosition > 500 Then
+        Dim rngToDelete As Object ' Word.Range
+        
+        ' Create a range from the start of the separator to the end of the document
+        Set rngToDelete = doc.Range(Start:=doc.Content.Characters(splitPosition).Start, End:=doc.Content.End)
+        
+        ' Delete the identified quoted content
+        rngToDelete.Delete
+        
+        Set rngToDelete = Nothing
+    End If
+
+    On Error GoTo 0
+End Sub
 
 'Save selected Outlook messages as PDFs – quiet & with headers
 Sub SaveMails_ToPDF_Background()
@@ -671,19 +736,8 @@ Sub SaveMails_ToPDF_Background()
                 doc.Range.InsertBefore hdr
             End If
             
-            '--- NEW: Slice away the quoted reply thread before saving to PDF ---
-            ' This happens on the temporary MHT file, so the original email is not changed.
-            With doc.Range
-                Dim p As Long
-                ' Find the start of the typical reply separator
-                p = InStr(1, .Text, "-----Original Message-----", vbTextCompare)
-                If p > 0 Then
-                    ' If found, create a new range from that point to the end of the document and delete it.
-                    Dim rngToDelete As Object ' Word.Range
-                    Set rngToDelete = doc.Range(Start:=.Characters(p).Start, End:=doc.Content.End)
-                    rngToDelete.Delete
-                End If
-            End With
+            ' Use the new, robust helper function to trim all quoted content
+            Call TrimQuotedContent(doc)
             
             '--- 4  export to PDF & clean up --------------------------
 
