@@ -115,8 +115,6 @@ End Function
 ' Do the job, process every selected emails and
 ' export them as .pdf files.
 '
-' If the user has ask for removing mails once exported,
-' emails will be removed.
 '
 ' --------------------------------------------------
 Sub SaveAsPDFfile()
@@ -146,7 +144,6 @@ Sub SaveAsPDFfile()
 
     Dim bContinue As Boolean
     Dim bAskForFileName As Boolean
-    Dim bRemoveMailAfterExport As Boolean
 
     ' Get all selected items
     Set oSelection = Application.ActiveExplorer.Selection
@@ -185,15 +182,6 @@ Sub SaveAsPDFfile()
         Set objWord = Nothing
         Exit Sub
     End If
-
-    ' --------------------------------------------------
-    ' Once the mail has been saved as PDF do we need to
-    ' remove it?
-    bRemoveMailAfterExport = MsgBox("Once the email has been " & _
-        "exported and saved onto your disk, do you wish to keep " & _
-        "it in your mailbox or do you want to delete it?" & vbCrLf & vbCrLf & _
-        "Press Yes to keep the mail, Press No to delete the mail after exportation", _
-        vbQuestion + vbYesNo + vbDefaultButton1) = vbNo
 
     ' --------------------------------------------------
     ' When more than one email has been selected, just ask the
@@ -310,13 +298,6 @@ Sub SaveAsPDFfile()
             ' And close once saved on disk
             objDoc.Close (False)
 
-            ' Kill the mail?
-            If bRemoveMailAfterExport Then
-                ' Ok but only if the mail has been successfully exported
-                If Dir(sFileName) <> "" Then
-                    oMail.Delete
-                End If
-            End If
 
         End If
 

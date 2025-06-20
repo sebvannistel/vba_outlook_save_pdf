@@ -43,7 +43,7 @@ Transform your Outlook into a powerful email-to-PDF converter in a few simple st
 
 1. **Select the Emails**: Choose one or multiple emails you wish to save as PDFs.
 2. **Activate the Macro**: Click on the `SaveAsPDFfile` button on your custom ribbon.
-3. **Specify Save Location and Preferences**: Follow the prompts to select a destination folder for the PDFs and choose whether to delete the original emails post-conversion.
+3. **Specify Save Location**: Follow the prompts to select a destination folder for the PDFs.
 4. **Completion**: Sit back and watch as your selected emails are transformed and saved as PDFs on your disk.
 
 ![Demonstration](images/demo.gif)
