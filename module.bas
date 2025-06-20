@@ -31,6 +31,7 @@ Private Const olMHTML As Long = 10               'Added for late-binding
 Private Const olMSG As Long = 3                  'Added for late-binding
 Private Const olUnrestricted As Long = 0         'NEW: For version-independent IRM/RMS check
 Private Const wdOpenFormatWebPages As Long = 7
+Private Const olDiscard As Long = 1 ' *** ADD THIS LINE ***
 
 Private objWord As Object
 
@@ -653,14 +654,12 @@ Sub SaveMails_ToPDF_Background()
 
         ' 1. Open the item in a hidden Inspector to get the "clean" view
         mailItem.Display False  ' False = modalless + invisible
-        Dim doc As Object
         Set doc = mailItem.GetInspector.WordEditor ' This gets the current view only
 
         ' 2. Inject a printable header (optional but recommended)
         Call InjectSimpleHeader(doc, mailItem)
 
         ' 3. Build filename and export straight to PDF
-        Dim pdfFile As String
         Dim safeSubj As String, datePrefix As String
         safeSubj = CleanFile(mailItem.Subject)
         datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
