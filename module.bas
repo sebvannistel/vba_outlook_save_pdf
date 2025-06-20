@@ -265,15 +265,15 @@ Sub SaveAsPDFfile()
     Next
 
     '----------- sort the kept items newest-first -----------------
-    Dim keys() As Variant, i As Long, j As Long, tmp As Variant
+    Dim keys() As Variant, k1 As Long, k2 As Long, tmpKey As Variant
     keys = latest.Keys
-    For i = LBound(keys) To UBound(keys) - 1
-        For j = i + 1 To UBound(keys)
-            If ItemDate(latest(keys(j))) > ItemDate(latest(keys(i))) Then
-                tmp = keys(i): keys(i) = keys(j): keys(j) = tmp
+    For k1 = LBound(keys) To UBound(keys) - 1
+        For k2 = k1 + 1 To UBound(keys)
+            If ItemDate(latest(keys(k2))) > ItemDate(latest(keys(k1))) Then
+                tmpKey = keys(k1): keys(k1) = keys(k2): keys(k2) = tmpKey
             End If
-        Next j
-    Next i
+        Next k2
+    Next k1
 
     '----------- export -------------------------------------------
     Dim kKey
