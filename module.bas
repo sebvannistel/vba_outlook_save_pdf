@@ -640,8 +640,8 @@ Sub SaveMails_ToPDF_Background()
                 ' The key already exists; check if this email is newer.
                 If itm.ReceivedTime > convDict(key).ReceivedTime Then
                     ' This email is newer, so update the value for the existing key.
-                    ' Note: We do not use 'Set' here.
-                    convDict(key) = itm
+                    ' Use Set when assigning objects in a Dictionary
+                    Set convDict(key) = itm
                 End If
             End If
         End If
