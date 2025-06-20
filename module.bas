@@ -512,7 +512,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
         
         ' Pattern 1: Outlook/Thunderbird Horizontal Rule (<hr...>)
         ' Use [!>] to match any character except '>' inside the tag.
-        .Text = "\<hr[!>]*\>"
+        .Text = "[<]hr[!>]*[>]" ' <-- PATCH 1: APPLIED
         If .Execute = True Then
             Set rngFound = .Parent
             doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
@@ -558,6 +558,8 @@ Sub SaveMails_ToPDF_Background()
     ' --- SETUP ---
     Const tmpExt As String = ".mht"
     Const olMail As Long = 43
+    Const PATH_WARN As Long = 220                   ' <-- PATCH 2: Use a named constant for path length
+    Const wdExportOptimizeForPrint As Long = 0      ' <-- PATCH 2: Use a named constant for readability
 
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
@@ -571,7 +573,7 @@ Sub SaveMails_ToPDF_Background()
     
     tgtFolder = AskForTargetFolder("")
     
-    If Len(tgtFolder) > 220 Then
+    If Len(tgtFolder) > PATH_WARN Then ' <-- PATCH 2: APPLIED
         MsgBox "The selected folder path is too long. Please choose a shorter path to avoid errors.", vbExclamation, "Path Too Long"
         wrd.Quit
         Set wrd = Nothing: Set objWord = Nothing
@@ -614,7 +616,7 @@ Sub SaveMails_ToPDF_Background()
             If Err.Number = 0 And Len(key) > 0 Then
                 If Not convDict.Exists(key) Then
                     Set convDict(key) = itm
-                ElseIf itm.ReceivedTime > convDict(key).ReceivedTime Then
+                ElseIf convDict(key).ReceivedTime > 0 And itm.ReceivedTime > convDict(key).ReceivedTime Then ' <-- PATCH 3: APPLIED
                     Set convDict(key) = itm
                 End If
             Else
@@ -692,7 +694,7 @@ Sub SaveMails_ToPDF_Background()
             
             ' --- 4. EXPORT TO PDF & CLEANUP ---
             If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
-            doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
+            doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=wdExportOptimizeForPrint ' <-- PATCH 2: APPLIED
             doc.Close False
             Set doc = Nothing
             fso.DeleteFile tmpFile
