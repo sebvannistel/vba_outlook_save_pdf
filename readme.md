@@ -13,6 +13,7 @@ Imagine effortlessly saving one or multiple emails from your Outlook inbox direc
 ## Contents
 
 - [Installation Guide](#"How-to-add-to-Outlook")
+- [Enable Macros in Outlook](#enable-macros-in-outlook)
 - [How to Use](#usage)
 - [License Information](#license)
 - [Access the Code Directly!](https://raw.githubusercontent.com/cavo789/vba_outlook_save_pdf/master/module.bas)
@@ -38,6 +39,15 @@ Transform your Outlook into a powerful email-to-PDF converter in a few simple st
    - Personalize the name of the new ribbon tab for easy access.
 
 **Prerequisite**: Ensure Microsoft Word is installed on your computer for the macro to function.
+
+## Enable Macros in Outlook
+
+Make sure Outlook actually loads the macros. By default Outlook disables them for security reasons.
+
+1. Navigate to `File ▶ Options ▶ Trust Center ▶ Trust Center Settings ▶ Macro Settings`.
+   - For testing you can choose **Enable all macros** (tighten this later). See [support.microsoft.com](https://support.microsoft.com) for more details.
+2. For long-term use create a self-signed certificate with `SelfCert.exe`, add the signature in `VBE ▶ Tools ▶ Digital Signature…`, then switch security to **Disable all except digitally-signed** so Outlook trusts it automatically. See [learn.microsoft.com](https://learn.microsoft.com) for the procedure.
+3. If you're running the "New Outlook" preview, note that it doesn't support VBA macros at all. Switch back to "Classic Outlook" if you want the macros to persist. See [learn.microsoft.com](https://learn.microsoft.com) for more information.
 
 ## How to Use
 
