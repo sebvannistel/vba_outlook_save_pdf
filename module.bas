@@ -702,6 +702,7 @@ NextSelectionItem:
 
         If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
         doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+        doc.Close False
 
         mailItem.Close olDiscard
         Set doc = Nothing
