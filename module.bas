@@ -512,7 +512,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
         
         ' Pattern 1: Outlook/Thunderbird Horizontal Rule (<hr...>)
         ' Use [!>] to match any character except '>' inside the tag.
-        .Text = "<hr[!>]*>"
+        .Text = "\<hr[!>]*\>"
         If .Execute = True Then
             Set rngFound = .Parent
             doc.Range(Start:=rngFound.Start, End:=doc.Content.End).Delete
