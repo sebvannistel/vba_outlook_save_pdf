@@ -256,7 +256,7 @@ Sub SaveAsPDFfile()
             sTempFileName = sTempFolder & "\outlook.mht"
 
             ' Kill the previous file if already present
-            If Dir(sTempFileName) Then Kill (sTempFileName)
+            If Len(Dir$(sTempFileName)) > 0 Then Kill sTempFileName
 
             ' Save the mht-file
             oMail.SaveAs sTempFileName, olMHTML
