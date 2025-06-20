@@ -596,6 +596,8 @@ Sub SaveMails_ToPDF_Background()
     ' --- INITIALIZE ---
     On Error GoTo ErrorHandler
     Set wrd = CreateObject("Word.Application")
+    '===== before entering the main loop ==================================
+    wrd.ScreenUpdating = False           ' <-- NEW -- stops display flicker
     Set objWord = wrd
     ' wrd.Visible = True ' <-- For debugging only
     
@@ -694,6 +696,9 @@ Sub SaveMails_ToPDF_Background()
             KeepIRM:=False, _
             BitmapMissingFonts:=True, _
             CreateBookmarks:=wdExportCreateNoBookmarks
+        
+        '===== inside the main loop, just after the FIRST ExportAsFixedFormat ===
+        If Err.Number = 0 Then Err.Clear     ' <-- NEW -- wipe any stale error
             
         If Err.Number <> 0 Then
             Err.Clear
@@ -742,6 +747,8 @@ NextSelectedItem:
 
 Cleanup:
     On Error Resume Next
+    '===== at the very end, in Cleanup  ====================================
+    wrd.ScreenUpdating = True            ' <-- NEW -- always restore it
     If Not wrd Is Nothing Then wrd.Quit
     Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
     Set fso = Nothing: Set sel = Nothing
