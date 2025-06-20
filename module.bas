@@ -445,6 +445,8 @@ Sub SaveMails_ToPDF_Background()
     Set sel = Application.ActiveExplorer.Selection
     If sel.Count = 0 Or Len(tgtFolder) = 0 Then
         wrd.Quit
+        Set wrd = Nothing      ' FIX: Ensure Word object is released on early exit
+        Set objWord = Nothing  ' FIX: Ensure global Word object is also released
         Exit Sub
     End If
 
@@ -565,6 +567,11 @@ Sub SaveMails_ToPDF_Background()
             ' *** UPDATE: Use explicit OptimizeFor:=0 parameter ***
             doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
             doc.Close False
+            
+            ' *** FIX: This is the key change. By setting doc to Nothing immediately after closing, ***
+            ' *** we prevent the cleanup block at 'NextItemInLoop' from trying to close it again. ***
+            Set doc = Nothing
+            
             fso.DeleteFile tmpFile
 
             done = done + 1
@@ -583,12 +590,25 @@ NextItemInLoop:
         ' This label is the target for the GoTo statement when an error occurs.
         ' It ensures the loop continues with the next item.
         ' --- UPDATE 3.1: Clean up Word document object if it exists before next loop ---
+        ' This block now safely handles cleanup for items that failed mid-process,
+        ' while the 'Set doc = Nothing' change above prevents it from causing an
+        ' error on successfully processed items.
         If Not doc Is Nothing Then doc.Close False
         Set doc = Nothing
     Next mi
 
     If showProgress Then Application.StatusBar = False
     wrd.Quit
+    
+    ' *** FIX: Added full cleanup block to explicitly release all COM objects at the end, as per best practices. ***
+    Set doc = Nothing
+    Set wrd = Nothing
+    Set objWord = Nothing
+    Set fso = Nothing
+    Set sel = Nothing
+    Set mi = Nothing
+    Set mailItem = Nothing
+
     MsgBox done & " mail(s) saved as PDF to " & tgtFolder & vbCrLf & vbCrLf & _
            "A log of any skipped items has been saved to _SkippedItems.log", vbInformation
 
