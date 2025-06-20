@@ -198,20 +198,29 @@ Private Function StripQuotedBody(mi As Outlook.MailItem) As String
     html = mi.HTMLBody
     If Len(html) = 0 Then Exit Function   'nothing to do
 
+    ' --- BEGINNING OF REGEX FIX ---
+    ' This section is updated to use VBScript-compatible regular expressions.
+    ' It removes invalid inline flags like (?s) and non-capturing groups (?:).
     Set re = CreateObject("VBScript.RegExp")
-    re.Global = False
-    re.IgnoreCase = True
-    re.MultiLine = False ' This should be True to handle multiline anchors like `^On...wrote:`
-    re.MultiLine = True ' Correcting based on pattern usage
-    re.Pattern = "(?s)" & _                       'single-line mode
-                "(<div[^>]*class=""(?:outlookmessageheader|gmail_quote|gmail_attr)""[^>]*>)|" & _
-                "(<hr[^>]*>)|" & _
-                "(<!--\s*StartFragment\s*-->)|" & _
-                "(-----\s*Original Message\s*-----)|" & _
-                "(----\s*Forwarded message\s*----)|" & _
-                "(?m)^\s*On .+ wrote:|" & _        'plain EN
-                "(?m)^\s*Von: .+Gesendet:|" & _    'plain DE
-                "(?m)^\s*Le .+ a écrit :"          'plain FR
+    
+    Dim pat$
+    pat = "(<div[^>]*outlookmessageheader[^>]*>)|" & _
+          "(<div[^>]*gmail_quote[^>]*>)|" & _
+          "(<div[^>]*gmail_attr[^>]*>)|" & _
+          "(<hr\b[^>]*>)|" & _
+          "(--+\s*Original Message\s*--+)|" & _
+          "(--+\s*Forwarded message\s*--+)|" & _
+          "(^\s*On .+ wrote:)|" & _
+          "(^\s*Von: .+Gesendet:)|" & _
+          "(^\s*Le .+ a écrit :)"
+
+    With re
+        .Pattern     = pat
+        .Global      = False      ' Stop at the first match
+        .IgnoreCase  = True       ' Case-insensitive matching
+        .MultiLine   = True       ' Allow ^ to match the start of any line
+    End With
+    ' --- END OF REGEX FIX ---
 
     If re.Test(html) Then
         Set m = re.Execute(html)(0)
