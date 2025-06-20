@@ -60,199 +60,6 @@ Private Function GetTargetFolder_Universal() As String
     On Error GoTo 0
 End Function
 
-
-' --------------------------------------------------
-'
-' Do the job, process every selected emails and
-' export them as .pdf files.
-'
-'
-' --------------------------------------------------
-'Sub SaveAsPDFfile()
-'
-'    Const wdExportOptimizeForPrint = 0
-'    Const wdExportAllDocument = 0
-'    Const wdExportDocumentContent = 0
-'    Const wdExportCreateNoBookmarks = 0
-'
-'    Dim oSelection As Outlook.Selection
-'    Dim oMail As Object
-'
-'    ' Use late-bindings
-'    Dim objDoc As Object
-'    Dim objFSO As Object
-'
-'    Dim dlgSaveAs As FileDialog
-'    Dim objFDFS As FileDialogFilters
-'    Dim fdf As FileDialogFilter
-'    Dim I As Integer, wSelectedeMails As Integer
-'    Dim sFileName As String
-'    Dim sTargetFolder As String
-'    Dim iCount As Long
-'
-'    Dim bContinue As Boolean
-'    Dim bAskForFileName As Boolean
-'
-'    ' Get all selected items
-'    Set oSelection = Application.ActiveExplorer.Selection
-'
-'    ' Get the number of selected emails
-'    wSelectedeMails = oSelection.Count
-'
-'    ' Make sure at least one item is selected
-'    If wSelectedeMails < 1 Then
-'        Call MsgBox("Please select at least one email", _
-'            vbExclamation, "Save as PDF")
-'        Exit Sub
-'    End If
-'
-'    ' --------------------------------------------------
-'    bContinue = MsgBox("You're about to export " & wSelectedeMails & " " & _
-'        "emails as PDF files, do you want to continue? If you Yes, you'll " & _
-'        "first need to specify the name of the folder where to store the files", _
-'        vbQuestion + vbYesNo + vbDefaultButton1) = vbYes
-'
-'    If Not bContinue Then
-'        Exit Sub
-'    End If
-'
-'    ' --------------------------------------------------
-'    ' Start Word and make initializations
-'    Set objWord = CreateObject("Word.Application")
-'    objWord.Visible = False
-'
-'    ' --------------------------------------------------
-'    ' Define the target folder, where to save emails
-'    sTargetFolder = AskForTargetFolder(cFolder)
-'
-'    If sTargetFolder = "" Then
-'        objWord.Quit
-'        Set objWord = Nothing
-'        Exit Sub
-'    End If
-'
-'    ' --------------------------------------------------
-'    ' When more than one email has been selected, just ask the
-'    ' user if we need to ask for filenames each time (can be
-'    ' annoying)
-'    bAskForFileName = True
-'
-'    If (wSelectedeMails > 1) Then
-'        bAskForFileName = MsgBox("You're about to save " & wSelectedeMails & " " & _
-'            "emails as PDF files. Do you want to see " & wSelectedeMails & " " & _
-'            "prompts so you can update the filename or just use the automated " & _
-'            "one (so no prompt)." & vbCrLf & vbCrLf & _
-'            "Press Yes to see prompts, Press No to use automated name", _
-'            vbQuestion + vbYesNo + vbDefaultButton2) = vbYes
-'
-'        MsgBox "BE CAREFULL: You'll not see a progression on the screen (unfortunately, " & _
-'            "Outlook doesn't allow this)." & vbCrLf & vbCrLf & _
-'            "If you're exporting a lot of mails, the process can take a while. " & _
-'            "Perhaps the best way to see that things are working is to open a " & _
-'            "explorer window and see how files are added to the folder." & vbCrLf & vbCrLf & _
-'            "Once finished, you'll see a feedback message.", _
-'            vbInformation + vbOKOnly
-'    End If
-'
-'    ' --------------------------------------------------
-'    ' Define the SaveAs dialog
-'    If bAskForFileName Then
-'
-'        Set dlgSaveAs = objWord.FileDialog(msoFileDialogSaveAs)
-'
-'        ' --------------------------------------------------
-'        ' Determine the FilterIndex for saving as a pdf-file
-'        ' Get all the filters and make sure we've "pdf"
-'        Set objFDFS = dlgSaveAs.Filters
-'
-'        I = 0
-'
-'        For Each fdf In objFDFS
-'            I = I + 1
-'
-'            If InStr(1, fdf.Extensions, "pdf", vbTextCompare) > 0 Then
-'                Exit For
-'            End If
-'        Next fdf
-'
-'        Set objFDFS = Nothing
-'
-'        ' Set the FilterIndex to pdf-files
-'        dlgSaveAs.FilterIndex = I
-'
-'    End If
-'
-'    ' ----------------------------------------------------
-'    ' Initialize file system for folder and file checks
-'    Set objFSO = CreateObject("Scripting.FileSystemObject")
-'
-'    If Not objFSO.FolderExists(sTargetFolder) Then
-'        objFSO.CreateFolder sTargetFolder
-'    End If
-'
-'    ' ----------------------------------------------------
-'    ' We are ready to start
-'    For Each oMail In oSelection
-'
-'            Const cMAX_PATH As Long = 260              'official value
-'
-'            '1. Render and grab live Word.Document
-'            oMail.Display False                        'forces Word to build editor
-'            Set objDoc = oMail.GetInspector.WordEditor
-'
-'            '2.  Build the unique PDF name
-'            Dim base$, try$, dup&, room&
-'            base = sTargetFolder & Format(ItemDate(oMail), "yyyymmdd-hhnnss") _
-'                   & " – " & CleanSubject(oMail.Subject)
-'
-'            room = cMAX_PATH - Len(sTargetFolder) - 5
-'            If Len(base) > room Then base = Left$(base, room)
-'
-'            try = base & ".pdf": dup = 1
-'            Do While objFSO.FileExists(try)
-'                try = base & "_" & dup & ".pdf": dup = dup + 1
-'            Loop
-'
-'            If bAskForFileName Then sFileName = AskForFileName(try) Else sFileName = try
-'
-'            '3.  Export and close
-'            If Len(Trim$(sFileName)) > 0 Then
-'                objDoc.ExportAsFixedFormat _
-'                    OutputFileName:=sFileName, _
-'                    ExportFormat:=wdExportFormatPDF, _
-'                    OptimizeFor:=wdExportOptimizeForPrint, _
-'                    Range:=wdExportAllDocument, _
-'                    Item:=wdExportDocumentContent, _
-'                    CreateBookmarks:=wdExportCreateNoBookmarks
-'            End If
-'
-'            iCount = iCount + 1
-'            If iCount Mod 50 = 0 Then DoEvents
-'
-'    Next oMail
-'
-'    Set dlgSaveAs = Nothing
-'
-'    On Error GoTo 0
-'
-'    ' Close the document and Word
-'
-'    On Error Resume Next
-'    objWord.Quit
-'    On Error GoTo 0
-'
-'    ' Cleanup
-'
-'    Set oSelection = Nothing
-'    Set oMail = Nothing
-'    Set objDoc = Nothing
-'    Set objWord = Nothing
-'    Set objFSO = Nothing
-'
-'    MsgBox "Done, mails have been exported to " & sTargetFolder, vbInformation
-'
-'End Sub
-
 Private Function CleanSubject(raw As String) As String
     Static rePfx As Object, reBad As Object
 
@@ -301,58 +108,6 @@ End Function
 Private Function IsSpecial(itm As Object) As Boolean
     IsSpecial = Not (TypeOf itm Is Outlook.MailItem)
 End Function
-
-
-' --------------------------------------------------
-' Export selected mails as PDFs entirely in the background
-' No Inspector windows will open and the original message
-' remains untouched.
-'Sub SaveSelectedMails_AsPDF_NoPopups()
-'
-'    Const tempExtMHT = ".mht"
-'
-'    Dim sel As Outlook.Selection
-'    Dim mi As Outlook.MailItem
-'    Dim objWord As Object, doc As Object
-'    Dim tmpFile As String, pdfFile As String
-'    Dim fso As Object
-'
-'    Set sel = Application.ActiveExplorer.Selection
-'    If sel.Count = 0 Then
-'        MsgBox "Nothing selected"
-'        Exit Sub
-'    End If
-'
-'    Set objWord = CreateObject("Word.Application")
-'    objWord.Visible = False
-'    Set fso = CreateObject("Scripting.FileSystemObject")
-'
-'    For Each mi In sel
-'
-'        '1. build filenames
-'        tmpFile = Environ$("TEMP") & "\" & _
-'                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & "_" & _
-'                  CleanFile(mi.Subject) & tempExtMHT
-'
-'        pdfFile = cFolder & _
-'                  Format(mi.ReceivedTime, "yyyymmdd-hhnnss") & " – " & _
-'                  CleanFile(mi.Subject) & ".pdf"
-'
-'        '2. save e-mail as an MHT without opening an Inspector
-'        mi.SaveAs tmpFile, olMHTML
-'
-'        '3. let Word convert that file straight to PDF
-'        Set doc = objWord.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
-'        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
-'        doc.Close False
-'
-'        fso.DeleteFile tmpFile
-'
-'    Next mi
-'
-'    objWord. Quit
-'    MsgBox sel.Count & " mail(s) exported."
-'End Sub
 
 Private Function CleanFile(s As String) As String
     Dim badChars As Variant, ch As Variant
@@ -537,9 +292,9 @@ Sub SaveAsPDFfile()
         GoTo Cleanup
     End If
 
-    ' FIX #1: Pick only the latest item before you open Word
+    ' FIX #1: This section now filters by EntryID to ensure each unique mail is
+    ' processed, solving the "one-per-conversation" problem.
     '-----------------------------------------------------------------
-    ' PASS 1 – keep just the newest item per conversation
     Dim latest As Object
     Set latest = CreateObject("Scripting.Dictionary")
     
@@ -551,22 +306,13 @@ Sub SaveAsPDFfile()
     
     Dim k As String, it As Object
 
-    ' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    ' >>> START OF APPLIED FIX (as per your request, using Fix Option #2)
-    '
-    ' The original code used ConversationID, which collapsed threads. This new
-    ' code uses EntryID to ensure every unique selected item is processed.
-    '
+    ' This loop ensures every unique email you selected is included for export.
     For Each it In sel
         k = it.EntryID                 ' <- unique key per message
         If Not latest.Exists(k) Then
             latest.Add k, it
         End If
     Next it
-    '
-    ' >>> END OF APPLIED FIX
-    ' >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-
     '-----------------------------------------------------------------
 
     total = latest.Count ' Use the count of the filtered list
