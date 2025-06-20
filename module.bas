@@ -249,8 +249,22 @@ Sub SaveAsPDFfile()
         ' Retrieve the selected email
         Set oMail = oSelection.Item(I)
 
-        If Not done.Exists(oMail.ConversationID) Then
-            done.Add oMail.ConversationID, True
+        '-----------------------------------------------
+        '  Dedup: process latest message per conversation
+        '-----------------------------------------------
+        Dim key As String
+        key = oMail.ConversationTopic                'stable across the thread
+
+        'keep the *latest* message only
+        If done.Exists(key) Then
+            If oMail.ReceivedTime > done(key) Then   'found a newer one: replace stamp
+                done(key) = oMail.ReceivedTime
+            Else
+                GoTo NextMail                         'older → skip
+            End If
+        Else
+            done.Add key, oMail.ReceivedTime
+        End If
 
             ' Construct a unique filename for the temp mht-file
             sTempFileName = sTempFolder & "\" & Replace(objFSO.GetTempName, ".tmp", ".mht")
@@ -326,6 +340,8 @@ Sub SaveAsPDFfile()
             End If
 
         End If
+
+NextMail:    'skip older copy
 
     Next I
 
