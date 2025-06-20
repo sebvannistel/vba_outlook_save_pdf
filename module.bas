@@ -31,7 +31,6 @@ Private Const olMHTML As Long = 10               'Added for late-binding
 Private Const olMSG As Long = 3                  'Added for late-binding
 Private Const olUnrestricted As Long = 0         'NEW: For version-independent IRM/RMS check
 Private Const wdOpenFormatWebPages As Long = 7
-Private Const olDiscard As Long = 1 ' *** ADD THIS LINE ***
 
 Private objWord As Object
 
@@ -64,7 +63,7 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         ' We must get the handle from the ActiveWindow or use FindWindow API.
         Dim wHwnd As LongPtr
         On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
-        wHwnd = objWord.ActiveWindow.Hwnd ' Word’s real property
+        wHwnd = objWord.ActiveWindow.hWnd ' Word’s real property
         If Err.Number <> 0 Then           ' If that fails, fall back to API
             Err.Clear
             ' Use Win32 FindWindow on the Word application's class name "OpusApp"
@@ -124,7 +123,7 @@ Private Function AskForFileName(ByVal sFileName As String) As String
     ' We must get the handle from the ActiveWindow or use FindWindow API.
     Dim wHwnd As LongPtr
     On Error Resume Next              ' Suppress error 438 on older Word versions or if no window is active
-    wHwnd = objWord.ActiveWindow.Hwnd ' Word’s real property
+    wHwnd = objWord.ActiveWindow.hWnd ' Word’s real property
     If Err.Number <> 0 Then           ' If that fails, fall back to API
         Err.Clear
         ' Use Win32 FindWindow on the Word application's class name "OpusApp"
@@ -387,7 +386,7 @@ End Function
 '========== 1) universal time getter ==========
 Private Function ItemDate(itm As Object) As Date
     Select Case True
-        Case TypeOf itm Is Outlook.MailItem
+        Case TypeOf itm Is Outlook.mailItem
             If itm.ReceivedTime = #1/1/4501# Then
                 ItemDate = itm.SentOn
             Else
@@ -462,7 +461,7 @@ Private Function CleanFile(s As String) As String
 End Function
 
 '--- HELPER: Injects a simple header that looks like Outlook's print style ---
-Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
+Private Sub InjectSimpleHeader(doc As Object, m As Outlook.mailItem)
     On Error Resume Next ' In case a property is not available
     Dim hdr As String
     hdr = "From: " & m.SenderName & vbCrLf & _
@@ -491,7 +490,7 @@ Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String,
 End Sub
 
 '--- helper: always create a unique temp MHT name
-Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
+Private Function GetUniqueTempMHT(mi As Outlook.mailItem, ext As String) As String
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     Dim base$, try$
     base = Environ$("TEMP") & "\" & Format(ItemDate(mi), "yyyymmdd-hhnnss") _
@@ -621,7 +620,7 @@ Sub SaveMails_ToPDF_Background()
 
     On Error Resume Next
     For Each itm In sel
-        If TypeOf itm Is Outlook.MailItem Then
+        If TypeOf itm Is Outlook.mailItem Then
             key = itm.ConversationID
             If Err.Number = 0 And Len(key) > 0 Then
                 If Not convDict.Exists(key) Then
@@ -649,17 +648,19 @@ Sub SaveMails_ToPDF_Background()
     For Each mailItem In convDict.Items
 
         ' Skip anything that isn’t a mail item (safety check)
-        If Not TypeOf mailItem Is Outlook.MailItem Then GoTo NextItem
+        If Not TypeOf mailItem Is Outlook.mailItem Then GoTo NextItem
         If mailItem.Class <> olMail Then GoTo NextItem
 
         ' 1. Open the item in a hidden Inspector to get the "clean" view
         mailItem.Display False  ' False = modalless + invisible
+        'Dim doc As Object ' <--- THIS IS THE FIX: REMOVED DUPLICATE DECLARATION
         Set doc = mailItem.GetInspector.WordEditor ' This gets the current view only
 
         ' 2. Inject a printable header (optional but recommended)
         Call InjectSimpleHeader(doc, mailItem)
 
         ' 3. Build filename and export straight to PDF
+        'Dim pdfFile As String ' <--- THIS IS THE FIX: REMOVED DUPLICATE DECLARATION
         Dim safeSubj As String, datePrefix As String
         safeSubj = CleanFile(mailItem.Subject)
         datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
