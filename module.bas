@@ -652,15 +652,6 @@ Sub SaveMails_ToPDF_Background()
     '================================================================================
     Dim mailItem As Object ' Use Object for safety with dictionary items
 
-    ' --- START: ADDED DIAGNOSTIC PROBE (per instruction 1) ---
-    Dim k As Variant
-    For Each k In convDict.Keys
-        If Not IsObject(convDict(k)) Or convDict(k) Is Nothing Then
-            Debug.Print "BAD  →  key=" & k & "  type=" & TypeName(convDict(k))
-        End If
-    Next k
-    Stop            '←  hit Ctrl-G to read Debug window
-    ' --- END: ADDED DIAGNOSTIC PROBE ---
 
     For Each mailItem In convDict.Items
 
