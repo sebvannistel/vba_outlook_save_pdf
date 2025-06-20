@@ -143,8 +143,8 @@ Sub SaveAsPDFfile()
 
     Dim bContinue As Boolean
     Dim bAskForFileName As Boolean
-    Dim done As Object
-    Set done = CreateObject("Scripting.Dictionary")
+    Dim latest As Object
+    Set latest = CreateObject("Scripting.Dictionary")
 
     ' Get all selected items
     Set oSelection = Application.ActiveExplorer.Selection
@@ -242,29 +242,30 @@ Sub SaveAsPDFfile()
 
     ' ----------------------------------------------------
     ' We are ready to start
-    ' Process every selected emails; one by one
+    ' Pass 1 – build a map of the latest message per topic
 
+    Dim key As String
     For I = 1 To wSelectedeMails
 
-        ' Retrieve the selected email
         Set oMail = oSelection.Item(I)
 
-        '-----------------------------------------------
-        '  Dedup: process latest message per conversation
-        '-----------------------------------------------
-        Dim key As String
-        key = oMail.ConversationTopic                'stable across the thread
-
-        'keep the *latest* message only
-        If done.Exists(key) Then
-            If oMail.ReceivedTime > done(key) Then   'found a newer one: replace stamp
-                done(key) = oMail.ReceivedTime
-            Else
-                GoTo NextMail                         'older → skip
-            End If
+        If IsSpecial(oMail) Then
+            key = oMail.EntryID                'always its own PDF
         Else
-            done.Add key, oMail.ReceivedTime
+            key = oMail.ConversationTopic      'normal dedup
         End If
+
+        If Not latest.Exists(key) Then
+            Set latest(key) = oMail
+        ElseIf oMail.ReceivedTime > latest(key).ReceivedTime Then
+            Set latest(key) = oMail
+        End If
+    Next I
+
+    ' Pass 2 – export the kept messages only
+    Dim itm As Variant
+    For Each itm In latest.Items
+        Set oMail = itm
 
             ' Construct a unique filename for the temp mht-file
             sTempFileName = sTempFolder & "\" & Replace(objFSO.GetTempName, ".tmp", ".mht")
@@ -339,9 +340,7 @@ Sub SaveAsPDFfile()
 
             End If
 
-NextMail:    'skip older copy
-
-    Next I
+    Next itm
 
     Set dlgSaveAs = Nothing
 
@@ -400,4 +399,26 @@ Private Function CleanSubject(raw As String) As String
 
     'Guard against NULL subjects  
     CleanSubject = Trim$(reBad.Replace(rePfx.Replace(CStr(raw), ""), ""))
+End Function
+
+'--------------------------------------------------
+' Determine whether an email should be treated as a
+' "special" item that always gets its own PDF, even
+' when other mails share the same conversation topic.
+'--------------------------------------------------
+Private Function IsSpecial(oMail As Outlook.MailItem) As Boolean
+    Dim cls As String
+    cls = oMail.MessageClass
+
+    If cls Like "IPM.Outlook.Recall*" _
+       Or cls Like "IPM.Recall.Report*" _
+       Or cls Like "REPORT.IPM.NOTE.*" _
+       Or cls Like "REPORT.IPM.SCHEDULE.*" _
+       Or cls Like "IPM.Schedule.Meeting.*" _
+       Or cls Like "IPM.Note.Rules.OofTemplate*" _
+       Or cls Like "IPM.TaskRequest.*" Then
+        IsSpecial = True
+    ElseIf InStr(1, oMail.Subject, "Automatic reply:", vbTextCompare) > 0 Then
+        IsSpecial = True
+    End If
 End Function
