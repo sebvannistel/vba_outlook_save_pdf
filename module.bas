@@ -457,6 +457,17 @@ Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String,
     End If
 End Sub
 
+' *** NEW HELPER SUB: Robustly clears the status bar, handling all errors silently. ***
+Private Sub SafeClearStatusBar()
+    On Error Resume Next ' swallow 438 or other errors silently
+    Dim exp As Outlook.Explorer
+    Set exp = Application.ActiveExplorer
+    If Not exp Is Nothing Then
+        exp.StatusBar = "" ' clear custom text
+    End If
+    On Error GoTo 0
+End Sub
+
 '--- helper: always create a unique temp MHT name
 Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
@@ -575,18 +586,22 @@ Sub SaveAsPDFfile()
     Dim item As Object
     Dim progressCounter As Long
     
-    ' *** SAFETY CHECK: Only set status bar if an Explorer window is active ***
+    ' *** UPDATED: Set status bar only if Explorer is active and property exists ***
     If Not Application.ActiveExplorer Is Nothing Then
+        On Error Resume Next ' In case .StatusBar is deprecated or causes an error
         Application.ActiveExplorer.StatusBar = "Preparing to save " & total & " selected email(s)..."
+        On Error GoTo 0
     End If
 
     For Each item In sel
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
         
-        ' *** SAFETY CHECK: Only set status bar if an Explorer window is active ***
+        ' *** UPDATED: Set status bar only if Explorer is active and property exists ***
         If Not Application.ActiveExplorer Is Nothing Then
+            On Error Resume Next ' In case .StatusBar is deprecated or causes an error
             Application.ActiveExplorer.StatusBar = "Processing " & progressCounter & " of " & total & "..."
+            On Error GoTo 0
         End If
         
         If TypeOf item Is Outlook.MailItem Then
@@ -683,10 +698,8 @@ Cleanup:
         wrd.StatusBar = False
     End If
 
-    ' Safely clear Outlook's status bar
-    If Not Application.ActiveExplorer Is Nothing Then
-        Application.ActiveExplorer.StatusBar = ""
-    End If
+    ' *** UPDATED: Safely clear Outlook's status bar using the new helper function ***
+    Call SafeClearStatusBar
     
     ' Safely quit Word and release all objects
     If Not wrd Is Nothing Then wrd.Quit
