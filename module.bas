@@ -339,8 +339,6 @@ Sub SaveAsPDFfile()
 
             End If
 
-        End If
-
 NextMail:    'skip older copy
 
     Next I
