@@ -245,8 +245,7 @@ End Function
 '
 '            Const MAX_PATH As Long = 260              'official value
 '
-'            '1. Trim quoted thread, render, and grab live Word.Document
-'            oMail.HTMLBody = StripQuotedBody(oMail)    'update body in place
+'            '1. Render and grab live Word.Document
 '            oMail.Display False                        'forces Word to build editor
 '            Set objDoc = oMail.GetInspector.WordEditor
 '
@@ -343,19 +342,6 @@ Private Function ItemDate(itm As Object) As Date
     End Select
 End Function
 
-Function StripQuotedBody(mi As Outlook.MailItem) As String
-    Dim html$, pos&
-    html = mi.HTMLBody
-    If Len(html) = 0 Then html = Replace(mi.Body, vbCrLf, "<br>")
-
-    'Common Outlook marker for the reply header
-    pos = InStr(html, "class=""OutlookMessageHeader""")
-    If pos = 0 Then pos = InStr(html, "-----Original Message-----")
-    If pos = 0 Then pos = InStr(html, "<hr")              'fallback
-
-    If pos > 0 Then html = Left$(html, pos - 1) & "</body></html>"
-    StripQuotedBody = html
-End Function
 
 ' --------------------------------------------------
 ' Export selected mails as PDFs entirely in the background
@@ -444,6 +430,12 @@ Sub SaveMails_ToPDF_Background()
     wrd.DisplayAlerts = 0             'wdAlertsNone
     Set fso = CreateObject("Scripting.FileSystemObject")
 
+    Dim total As Long
+    Dim done  As Long
+    Dim showProgress As Boolean
+    total = sel.Count
+    showProgress = (total > 100)
+
     For Each mi In sel
 
         '--- 1  build temp & final filenames ----------------------
@@ -477,8 +469,15 @@ Sub SaveMails_ToPDF_Background()
         doc.Close False
         fso.DeleteFile tmpFile
 
+        done = done + 1
+        If showProgress Then
+            Application.StatusBar = "Saving mail " & done & " of " & total & "..."
+            If done Mod 25 = 0 Then DoEvents
+        End If
+
     Next mi
 
+    If showProgress Then Application.StatusBar = False
     wrd.Quit
     MsgBox sel.Count & " mail(s) saved to " & tgtFolder, vbInformation
 
