@@ -245,59 +245,60 @@ Sub SaveAsPDFfile()
     ' Process every selected emails; one by one
     On Error Resume Next
 
+    Dim done As Object
+    Set done = CreateObject("Scripting.Dictionary")
+
     For I = 1 To wSelectedeMails
 
         ' Retrieve the selected email
         Set oMail = oSelection.Item(I)
 
-        ' Construct the filename for the temp mht-file
-        sTempFileName = sTempFolder & "\outlook.mht"
+        If Not done.Exists(oMail.ConversationID) Then
+            done.Add oMail.ConversationID, True
 
-        ' Kill the previous file if already present
-        If Dir(sTempFileName) Then Kill (sTempFileName)
+            ' Construct the filename for the temp mht-file
+            sTempFileName = sTempFolder & "\outlook.mht"
 
-        ' Save the mht-file
-        oMail.SaveAs sTempFileName, olMHTML
+            ' Kill the previous file if already present
+            If Dir(sTempFileName) Then Kill (sTempFileName)
 
-        ' Open the mht-file in Word without Word visible
-        Set objDoc = objWord.Documents.Open(FileName:=sTempFileName, Visible:=False, ReadOnly:=True)
+            ' Save the mht-file
+            oMail.SaveAs sTempFileName, olMHTML
 
-        ' Construct a safe file name from the message subject
-        sFileName = oMail.Subject
+            ' Open the mht-file in Word without Word visible
+            Set objDoc = objWord.Documents.Open(FileName:=sTempFileName, Visible:=False, ReadOnly:=True)
 
-        ' Sanitize filename, remove unwanted characters
-        Set oRegEx = CreateObject("vbscript.regexp")
-        oRegEx.Global = True
-        oRegEx.Pattern = "[\\/:*?""<>|]"
+            '---- Build a real unique name ----
+            Dim base As String, try As String, dup As Long
+            base = sTargetFolder & Format(oMail.ReceivedTime, "yyyy-mm-dd_hh-nn-ss") & "_" & _
+                CleanSubject(oMail.Subject)
+            try = base & ".pdf": dup = 1
+            Do While Len(Dir$(try)) > 0
+                try = base & "_" & dup & ".pdf"
+                dup = dup + 1
+            Loop
+            sFileName = try
 
-        ' Add the received email date as prefix
-        sFileName = sTargetFolder & Format(oMail.ReceivedTime, "yyyy-mm-dd_Hh-Nn") & _
-            "_" & Trim(oRegEx.Replace(sFileName, "")) & ".pdf"
-
-        If bAskForFileName Then
-            sFileName = AskForFileName(sFileName)
-        End If
-
-        If Not (Trim(sFileName) = "") Then
-
-            Debug.Print "Save " & sFileName
-
-            ' If already there, remove the file first
-            If Dir(sFileName) <> "" Then
-                Kill (sFileName)
+            If bAskForFileName Then
+                sFileName = AskForFileName(sFileName)
             End If
 
-            ' Save as pdf
-            objDoc.ExportAsFixedFormat OutputFileName:=sFileName, _
-                ExportFormat:=wdExportFormatPDF, OpenAfterExport:=False, OptimizeFor:= _
-                wdExportOptimizeForPrint, Range:=wdExportAllDocument, From:=0, To:=0, _
-                Item:=wdExportDocumentContent, IncludeDocProps:=True, KeepIRM:=True, _
-                CreateBookmarks:=wdExportCreateNoBookmarks, DocStructureTags:=True, _
-                BitmapMissingFonts:=True, UseISO19005_1:=False
+            If Not (Trim(sFileName) = "") Then
 
-            ' And close once saved on disk
-            objDoc.Close (False)
+                Debug.Print "Save " & sFileName
 
+                ' Save as pdf
+                objDoc.ExportAsFixedFormat OutputFileName:=sFileName, _
+                    ExportFormat:=wdExportFormatPDF, OpenAfterExport:=False, OptimizeFor:= _
+                    wdExportOptimizeForPrint, Range:=wdExportAllDocument, From:=0, To:=0, _
+                    Item:=wdExportDocumentContent, IncludeDocProps:=True, KeepIRM:=True, _
+                    CreateBookmarks:=wdExportCreateNoBookmarks, DocStructureTags:=True, _
+                    BitmapMissingFonts:=True, UseISO19005_1:=False
+
+                ' And close once saved on disk
+                objDoc.Close (False)
+
+            End If
 
         End If
 
@@ -324,3 +325,14 @@ Sub SaveAsPDFfile()
     MsgBox "Done, mails have been exported to " & sTargetFolder, vbInformation
 
 End Sub
+
+Private Function CleanSubject(raw As String) As String
+    Static rePfx As Object, reBad As Object
+    If rePfx Is Nothing Then
+        Set rePfx = CreateObject("vbscript.regexp")
+        rePfx.Pattern = "^(?i:\s*(re|fw|fwd)\s*:)+"
+        Set reBad = CreateObject("vbscript.regexp")
+        reBad.Pattern = "[\\/:*?""<>|]"
+    End If
+    CleanSubject = Trim$(reBad.Replace(rePfx.Replace(raw, ""), ""))
+End Function
