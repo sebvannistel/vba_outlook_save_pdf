@@ -720,6 +720,7 @@ Cleanup:
     Exit Sub
 
 ErrorHandler:
-    MsgBox "A critical error occurred: " & Err.Description, vbCritical, "Macro Error"
+    MsgBox "A critical error occurred on line " & Erl & "." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, vbCritical, "Macro Error"
     GoTo Cleanup
 End Sub
