@@ -488,64 +488,70 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
 End Function
 
 '---------------------------------------------------------------------------------------
-' Procedure : TrimQuotedContent (Version 2 - HTML Aware)
-' Author    : sebvannistel / 2025-06-20
-' Purpose   : Finds common email reply/forward separators within the document's
-'             underlying HTML/XML structure and removes the quoted content.
-'             This is far more reliable than a plain-text search.
+' Procedure : TrimQuotedContent (Version 3 - Final: Shape-based)
+' Author    : sebvannistel / 2025-06-21
+' Purpose   : Deletes quoted email content by programmatically finding the horizontal
+'             line separator (wdInlineShapeHorizontalLine) that Outlook inserts.
+'             This is the most reliable method, independent of text or language.
+'             Includes a text-based fallback for emails without a line.
 ' Argument  : doc - A Word.Document object (passed as a generic Object).
 '---------------------------------------------------------------------------------------
 Private Sub TrimQuotedContent(ByVal doc As Object)
     On Error Resume Next ' In case of any unexpected errors with the Word object
 
-    ' Get the document's content as WordOpenXML, which contains the HTML structure.
-    Dim xmlContent As String
-    xmlContent = doc.Content.WordOpenXML
-
-    ' --- Define a library of HTML and text separators, in order of priority ---
-    ' The <hr> tag is often the most reliable marker for Outlook replies.
-    Dim separators As Variant
-    separators = Array( _
-        "<hr", _
-        "-----Original Message-----", _
-        "-----Ursprüngliche Nachricht-----", _
-        "From:", _
-        "De :", _
-        "Von:" _
-    )
-
-    Dim separator As Variant
-    Dim splitPosition As Long
+    ' --- Define Word-specific constants for late binding ---
+    Const wdInlineShapeHorizontalLine As Long = 5
     
-    ' Initialize to 0, indicating no position has been found yet.
-    splitPosition = 0
+    Dim shape As Object ' Word.InlineShape
+    Dim rngToDelete As Object ' Word.Range
+    Dim foundSeparator As Boolean
+    
+    foundSeparator = False
 
-    ' --- Find the first separator from our priority list ---
-    For Each separator In separators
-        splitPosition = InStr(1, doc.Content.Text, separator, vbTextCompare)
+    ' --- STRATEGY 1: Find the visual horizontal line separator (most reliable) ---
+    If doc.InlineShapes.Count > 0 Then
+        For Each shape In doc.InlineShapes
+            ' Check if the shape is a horizontal line
+            If shape.Type = wdInlineShapeHorizontalLine Then
+                ' Found it. Define a range from the start of the line to the end of the document.
+                Set rngToDelete = doc.Range(Start:=shape.Range.Start, End:=doc.Content.End)
+                rngToDelete.Delete
+                
+                foundSeparator = True
+                Exit For ' Stop after deleting the first one found
+            End If
+        Next shape
+    End If
+    
+    ' --- STRATEGY 2: If no line was found, fall back to a text search ---
+    If Not foundSeparator Then
+        Dim separators As Variant
+        separators = Array( _
+            "-----Original Message-----", _
+            "-----Ursprüngliche Nachricht-----", _
+            "From:", _
+            "De :", _
+            "Von:" _
+        )
         
-        ' If a separator is found, we stop looking and use this one.
-        If splitPosition > 0 Then Exit For
-    Next separator
+        Dim separator As Variant
+        Dim splitPosition As Long
+        splitPosition = 0
 
-    ' --- If a valid separator was found, trim the document ---
-    ' The safety guard "> 200" prevents trimming if a separator (like "From:")
-    ' is found in the main header we added at the top. This value is smaller
-    ' than before because we are now searching plain text again, but the logic
-    ' of finding the *first* separator is more robust.
-    If splitPosition > 200 Then
-        Dim rngToDelete As Object ' Word.Range
-        
-        ' Create a range from the start of the separator text to the end of the document.
-        ' We subtract a few characters to ensure the separator line itself is deleted.
-        Set rngToDelete = doc.Range(Start:=(splitPosition - 5), End:=doc.Content.End)
-        
-        ' Delete the identified quoted content
-        rngToDelete.Delete
-        
-        Set rngToDelete = Nothing
+        For Each separator In separators
+            splitPosition = InStr(1, doc.Content.Text, separator, vbTextCompare)
+            If splitPosition > 200 Then ' Use safety margin to avoid our own header
+                ' Found a text separator. Define range and delete.
+                Set rngToDelete = doc.Range(Start:=(splitPosition - 5), End:=doc.Content.End)
+                rngToDelete.Delete
+                Exit For ' Stop after finding the first valid text separator
+            End If
+        Next separator
     End If
 
+    ' Cleanup
+    Set rngToDelete = Nothing
+    Set shape = Nothing
     On Error GoTo 0
 End Sub
 
