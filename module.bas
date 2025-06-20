@@ -534,7 +534,7 @@ End Sub
 ' =========================================================================================
 ' === REVISED, STABLE MAIN PROCEDURE                                                    ===
 ' =========================================================================================
-Sub SaveMails_ToPDF_Background_Stable()
+Sub SaveAsPDFfile()
     ' --- SETUP ---
     Const olDiscard As Long = 1
     Const wdExportFormatPDF As Long = 17
