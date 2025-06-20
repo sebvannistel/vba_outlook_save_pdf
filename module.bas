@@ -1,15 +1,11 @@
 #If VBA7 Then
-Private Declare PtrSafe Function SetForegroundWindow _
-        Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
-Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
-Private Declare PtrSafe Function FindWindowA Lib "user32" _
-    (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
+    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
+    Private Declare PtrSafe Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
 #Else
-Private Declare Function SetForegroundWindow _
-        Lib "user32" (ByVal hWnd As Long) As Long
-Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
-Private Declare Function FindWindowA Lib "user32" _
-    (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
+    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
+    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
 #End If
 ' --------------------------------------------------
 '
@@ -565,35 +561,32 @@ End Sub
 'Save selected Outlook messages as PDFs – quiet, de-duplicated, & with headers
 Sub SaveMails_ToPDF_Background()
     ' --- SETUP ---
-    Const tmpExt As String = ".mht"
     Const olMail As Long = 43
-    Const PATH_WARN As Long = 220                   ' <-- PATCH 2: Use a named constant for path length
-    Const wdExportOptimizeForPrint As Long = 0      ' <-- PATCH 2: Use a named constant for readability
+    Const PATH_WARN As Long = 220
+    Const wdExportOptimizeForPrint As Long = 0
+    Const olDiscard As Long = 1 ' Constant for MailItem.Close
 
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
-    Dim tmpFile As String, pdfFile As String, tgtFolder As String, logFilePath As String
-    Dim total As Long, done As Long, showProgress As Boolean
+    Dim pdfFile As String, tgtFolder As String, logFilePath As String
+    Dim total As Long, done As Long, skipped As Long, showProgress As Boolean
 
     ' --- INITIALIZE ---
+    On Error GoTo ErrorHandler
     Set wrd = CreateObject("Word.Application")
     Set objWord = wrd
     ' wrd.Visible = True ' <-- For debugging only
     
     tgtFolder = AskForTargetFolder("")
     
-    If Len(tgtFolder) > PATH_WARN Then ' <-- PATCH 2: APPLIED
+    If Len(tgtFolder) > PATH_WARN Then
         MsgBox "The selected folder path is too long. Please choose a shorter path to avoid errors.", vbExclamation, "Path Too Long"
-        wrd.Quit
-        Set wrd = Nothing: Set objWord = Nothing
-        Exit Sub
+        GoTo Cleanup
     End If
     
     Set sel = Application.ActiveExplorer.Selection
     If sel.Count = 0 Or Len(tgtFolder) = 0 Then
-        wrd.Quit
-        Set wrd = Nothing: Set objWord = Nothing
-        Exit Sub
+        GoTo Cleanup
     End If
     
     logFilePath = tgtFolder & "_SkippedItems.log"
@@ -601,105 +594,145 @@ Sub SaveMails_ToPDF_Background()
     Set fso = CreateObject("Scripting.FileSystemObject")
 
     '================================================================================
-    '--- LAYER 1: PRE-FILTER SELECTION (FIX #1: Verify Dictionary Creation) ---
+    '--- LAYER 1: PRE-FILTER SELECTION ---
     '================================================================================
     Dim convDict As Object
-    Dim itm As Object, key As String
+    Dim itm As Object, key As String, existingItem As Object, isNewer As Boolean
 
-    On Error Resume Next
     Set convDict = CreateObject("Scripting.Dictionary")
-    On Error GoTo 0
-    
     If convDict Is Nothing Then
-        MsgBox "Critical Error: Could not create the 'Scripting.Dictionary' object." & vbCrLf & _
-               "This may be due to a missing or corrupted system library (scrrun.dll).", vbCritical
-        wrd.Quit
-        Set wrd = Nothing: Set objWord = Nothing
-        Exit Sub
+        MsgBox "Critical Error: Could not create 'Scripting.Dictionary'.", vbCritical
+        GoTo Cleanup
     End If
 
-    ' --- START: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP (APPLIED FIXES) ---
+    ' --- START: BULLETPROOF DICTIONARY POPULATION LOOP ---
     For Each itm In sel
+        ' Only process valid MailItem objects from the start
         If TypeOf itm Is Outlook.MailItem Then
-            
-            ' FIX 2b: Safer pattern to get a key, avoiding empty Variants
-            Dim convID As String
-            On Error Resume Next
-            convID = itm.ConversationID
-            On Error GoTo 0
-            If Len(convID) = 0 Then convID = itm.EntryID
-            key = convID
-            
-            ' FIX 2a: Robust insert to avoid adding Nothing to the dictionary.
-            ' Using Set for the insert branch prevents adding a Nothing value,
-            ' which was the cause of the downstream error 424.
-            If Not convDict.Exists(key) Then
-                If Not itm Is Nothing Then Set convDict(key) = itm
-            ElseIf itm.ReceivedTime > convDict(key).ReceivedTime Then
-                Set convDict(key) = itm
+            On Error Resume Next ' Temporarily ignore errors from problematic items
+            key = itm.ConversationID
+            If Err.Number <> 0 Or Len(key) = 0 Then
+                Err.Clear
+                key = itm.EntryID
             End If
             
+            ' If we still couldn't get a key, skip this item entirely
+            If Err.Number <> 0 Or Len(key) = 0 Then
+                Err.Clear
+                GoTo NextSelectionItem
+            End If
+            On Error GoTo ErrorHandler ' Restore normal error handling
+
+            ' **FIX 2: Use the canonical and safe Add/Update pattern**
+            If Not convDict.Exists(key) Then
+                convDict.Add key, itm ' Use .Add for new items
+            Else
+                ' Robustly check if the new item is newer than the existing one
+                Set existingItem = convDict(key)
+                isNewer = False
+                
+                On Error Resume Next ' Handle items that might not have a ReceivedTime
+                isNewer = (itm.ReceivedTime > existingItem.ReceivedTime)
+                If Err.Number <> 0 Then
+                    isNewer = False ' If comparison fails, assume not newer
+                    Err.Clear
+                End If
+                On Error GoTo ErrorHandler
+                
+                If isNewer Then
+                    Set convDict(key) = itm ' Use Set to update existing items
+                End If
+            End If
         End If
+NextSelectionItem:
     Next itm
-    ' --- END: UPDATED AND CORRECTED DICTIONARY POPULATION LOOP ---
+    ' --- END: BULLETPROOF DICTIONARY POPULATION LOOP ---
     
     total = convDict.Count
     showProgress = (total > 1)
     If showProgress Then wrd.StatusBar = "Preparing to save " & total & " top-level mail(s)..."
 
     '================================================================================
-    '--- MAIN EXPORT LOOP (Using hidden Inspector for clean PDFs) ---
+    '--- MAIN EXPORT LOOP ---
     '================================================================================
-    Dim mailItem As Object ' Use Object for safety with dictionary items
+    ' **FIX 1: Change the loop variable from Object to Variant**
+    Dim mailItemVariant As Variant
+    Dim mailItem As Outlook.MailItem
 
+    For Each mailItemVariant In convDict.Items
 
-    For Each mailItem In convDict.Items
+        ' **This is the new, crucial check that prevents the crash.**
+        ' We check the type *after* successfully receiving it into the Variant.
+        If TypeOf mailItemVariant Is Outlook.MailItem Then
+            Set mailItem = mailItemVariant ' Assign it to our strongly-typed object
+        Else
+            ' The item was invalid (Nothing, Empty, or wrong type). Skip it.
+            skipped = skipped + 1
+            LogSkippedItem logFilePath, "Unknown Item", "Item in collection was not a valid Mail object."
+            GoTo NextDictionaryItem ' Jump to the next item in the loop
+        End If
+        
+        ' --- From here on, we know 'mailItem' is a valid object ---
+        
+        ' Open the item in a hidden Inspector (with protection for IRM mail)
+        On Error Resume Next
+        mailItem.Display False
+        Set doc = mailItem.GetInspector.WordEditor
+        
+        If doc Is Nothing Or Err.Number <> 0 Then
+            ' Failed to get the Word editor (e.g., IRM protected mail)
+            Err.Clear
+            mailItem.Close olDiscard ' Attempt to close the item
+            skipped = skipped + 1
+            LogSkippedItem logFilePath, mailItem.Subject, "Could not access content (possibly protected)."
+            GoTo NextDictionaryItem
+        End If
+        On Error GoTo ErrorHandler
 
-        ' Skip anything that isn’t a mail item (safety check)
-        If Not TypeOf mailItem Is Outlook.mailItem Then GoTo NextItem
-        If mailItem.Class <> olMail Then GoTo NextItem
-
-        ' 1. Open the item in a hidden Inspector to get the "clean" view
-        mailItem.Display False  ' False = modalless + invisible
-        'Dim doc As Object ' <--- THIS IS THE FIX: REMOVED DUPLICATE DECLARATION
-        Set doc = mailItem.GetInspector.WordEditor ' This gets the current view only
-
-        ' 2. Inject a printable header (optional but recommended)
         Call InjectSimpleHeader(doc, mailItem)
 
-        ' 3. Build filename and export straight to PDF
-        'Dim pdfFile As String ' <--- THIS IS THE FIX: REMOVED DUPLICATE DECLARATION
         Dim safeSubj As String, datePrefix As String
         safeSubj = CleanFile(mailItem.Subject)
         datePrefix = Format(ItemDate(mailItem), "yyyymmdd-hhnnss")
         pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
         
-        ' Enforce path length limit
         If Len(pdfFile) >= 260 Then
-            pdfFile = Left$(pdfFile, 255) & ".pdf"
+            pdfFile = Left$(tgtFolder & datePrefix & " – ", 255 - 4) & ".pdf"
         End If
 
         If fso.FileExists(pdfFile) Then fso.DeleteFile pdfFile, True
         doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
 
-        ' 4. Close the mail item without saving changes to it
         mailItem.Close olDiscard
         Set doc = Nothing
         
         done = done + 1
         If showProgress Then wrd.StatusBar = "Saving mail " & done & " of " & total & "..."
 
-NextItem:
-    Next mailItem
+NextDictionaryItem:
+    Next mailItemVariant
 
     ' --- FINAL CLEANUP ---
     If showProgress Then wrd.StatusBar = False
-    wrd.Quit
+    Dim msg As String
+    msg = done & " mail(s) saved as PDF to " & tgtFolder
+    If skipped > 0 Then
+        msg = msg & vbCrLf & vbCrLf & skipped & " item(s) were skipped. See the log file for details."
+    End If
+    MsgBox msg, vbInformation
+
+Cleanup:
+    On Error Resume Next
+    If Not wrd Is Nothing Then wrd.Quit
     Set doc = Nothing: Set wrd = Nothing: Set objWord = Nothing
     Set fso = Nothing: Set sel = Nothing
     Set itm = Nothing
     Set mailItem = Nothing: Set convDict = Nothing
+    Set existingItem = Nothing
+    Exit Sub
 
-    MsgBox done & " mail(s) saved as PDF to " & tgtFolder & vbCrLf & vbCrLf & "A log of any skipped items has been saved to _SkippedItems.log", vbInformation
-
+ErrorHandler:
+    MsgBox "A critical error occurred." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, vbCritical, "Macro Error"
+    GoTo Cleanup
 End Sub
