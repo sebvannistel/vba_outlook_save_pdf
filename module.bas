@@ -1,11 +1,3 @@
-#If VBA7 Then
-Private Declare PtrSafe Function SetForegroundWindow Lib "user32" _
-        (ByVal hWnd As LongPtr) As LongPtr
-#Else
-Private Declare Function SetForegroundWindow Lib "user32" _
-        (ByVal hWnd As Long) As Long
-#End If
-
 ' --------------------------------------------------
 '
 ' Outlook macro to save a selected item(s) as pdf
@@ -51,10 +43,6 @@ Private Function AskForTargetFolder(ByVal sTargetFolder As String) As String
         .Title = "Select a Folder where to save emails"
         .AllowMultiSelect = False
         .InitialFileName = sTargetFolder
-        
-        ' *** UPDATE: Make the folder dialog stay on top ***
-        SetForegroundWindow objWord.Hwnd
-        
         .Show
 
         On Error Resume Next
@@ -95,6 +83,9 @@ Private Function AskForFileName(ByVal sFileName As String) As String
     ' Set the initial location and file name for SaveAs dialog
     dlgSaveAs.InitialFileName = sFileName
 
+    ' UPDATE 1: Make the Save-As picker topmost as well
+    SetForegroundWindow objWord.Hwnd     'before dlgSaveAs.Show
+    
     ' Show the SaveAs dialog and save the message as pdf
     If dlgSaveAs.Show = -1 Then
 
@@ -258,7 +249,7 @@ End Function
 '    ' We are ready to start
 '    For Each oMail In oSelection
 '
-'            Const MAX_PATH As Long = 260              'official value
+'            Const cMAX_PATH As Long = 260              'official value
 '
 '            '1. Render and grab live Word.Document
 '            oMail.Display False                        'forces Word to build editor
@@ -269,7 +260,7 @@ End Function
 '            base = sTargetFolder & Format(ItemDate(oMail), "yyyymmdd-hhnnss") _
 '                   & " – " & CleanSubject(oMail.Subject)
 '
-'            room = MAX_PATH - Len(sTargetFolder) - 5
+'            room = cMAX_PATH - Len(sTargetFolder) - 5
 '            If Len(base) > room Then base = Left$(base, room)
 '
 '            try = base & ".pdf": dup = 1
@@ -405,7 +396,7 @@ End Function
 '
 '    Next mi
 '
-'    objWord.Quit
+'    objWord. Quit
 '    MsgBox sel.Count & " mail(s) exported."
 'End Sub
 
@@ -518,7 +509,8 @@ Sub SaveMails_ToPDF_Background()
 
 
             '--- 1  FIX A: Harden the filename builder to prevent MAX_PATH errors ---
-            Const MAX_PATH As Long = 260
+            ' UPDATE 5: Rename the magic constant MAX_PATH → cMAX_PATH
+            Const cMAX_PATH As Long = 260
             Dim safeSubj As String, datePrefix As String, room As Long
             Dim roomForTmp As Long, roomForPdf As Long
 
@@ -530,8 +522,8 @@ Sub SaveMails_ToPDF_Background()
             ' --- UPDATE 2.2: Adjust for null terminator (MAX_PATH - 1) ---
             ' Calculate the maximum allowed length for the subject part to avoid
             ' exceeding MAX_PATH for both the temporary and the final PDF file.
-            roomForTmp = (MAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
-            roomForPdf = (MAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
+            roomForTmp = (cMAX_PATH - 1) - (Len(Environ$("TEMP") & "\") + Len(datePrefix) + Len("_") + Len(tmpExt))
+            roomForPdf = (cMAX_PATH - 1) - (Len(tgtFolder) + Len(datePrefix) + Len(" – ") + Len(".pdf"))
 
             ' Use the more restrictive of the two calculated lengths
             If roomForTmp < roomForPdf Then room = roomForTmp Else room = roomForPdf
@@ -556,18 +548,12 @@ Sub SaveMails_ToPDF_Background()
                 ' *** UPDATE: Log the failure before attempting fallback ***
                 LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHTML, attempting MSG fallback"
 
-                ' *** UPDATE: Stop read-only errors on fallback save ***
+                ' Fallback: Save the item as a .MSG file in the target folder instead.
                 Dim msgFallbackFile As String
-                msgFallbackFile = Replace(pdfFile, ".pdf", ".msg")
-                
-                If fso.FileExists(msgFallbackFile) Then
-                    On Error Resume Next
-                    SetAttr msgFallbackFile, vbNormal    'clear RO flag
-                    fso.DeleteFile msgFallbackFile, True 'hard delete
-                    On Error GoTo 0
-                End If
-                
-                mailItem.SaveAs msgFallbackFile, 65      '65 = olMSGUnicode, safer for accents (as per update request)
+                ' UPDATE 4: Reuse the truncation helper for the “.msg” fallback path
+                msgFallbackFile = tgtFolder & datePrefix & " – " & safeSubj & ".msg"
+                ' UPDATE 3: Prefer the real constant over the magic number
+                mailItem.SaveAs msgFallbackFile, 9   'olMSGUnicode
 
                 ' Since MHTML creation failed, we cannot create a PDF. Skip to the next item.
                 GoTo NextItemInLoop
@@ -579,18 +565,19 @@ Sub SaveMails_ToPDF_Background()
             '--- 3  open in Word and prepend header -------------------
             Set doc = wrd.Documents.Open(tmpFile, ReadOnly:=True, Visible:=False)
 
-            ' *** UPDATE: Avoid inserting a double header ***
-            If Not Left$(doc.Range(0, 6).Text, 5) = "From:" Then
-                hdr = "From:    " & mailItem.SenderName & vbCrLf & _
-                      "Sent:    " & mailItem.SentOn & vbCrLf & _
-                      "To:      " & mailItem.To & vbCrLf & _
-                      "CC:      " & mailItem.CC & vbCrLf & _
-                      "BCC:     " & mailItem.BCC & vbCrLf & _
-                      "Subject: " & mailItem.Subject & vbCrLf & _
-                      String(60, "—") & vbCrLf & vbCrLf
+            hdr = "From:    " & mailItem.SenderName & vbCrLf & _
+                  "Sent:    " & mailItem.SentOn & vbCrLf & _
+                  "To:      " & mailItem.To & vbCrLf & _
+                  "CC:      " & mailItem.CC & vbCrLf & _
+                  "BCC:     " & mailItem.BCC & vbCrLf & _
+                  "Subject: " & mailItem.Subject & vbCrLf & _
+                  String(60, "—") & vbCrLf & vbCrLf
+
+            ' UPDATE 2: Off-by-one in the header-duplication test
+            If InStr(1, doc.Range(0, 50).Text, "From:") = 0 Then
                 doc.Range.InsertBefore hdr
             End If
-
+            
             '--- 4  export to PDF & clean up --------------------------
 
             ' *** FIX: Ensure the target file is writable before exporting. ***
@@ -636,7 +623,8 @@ NextItemInLoop:
         Set doc = Nothing
     Next mi
 
-    If showProgress Then Application.StatusBar = False
+    ' UPDATE 6: Replace Application.StatusBar = False with Application.StatusBar = ""
+    If showProgress Then Application.StatusBar = ""
     wrd.Quit
     
     ' *** FIX: Added full cleanup block to explicitly release all COM objects at the end, as per best practices. ***
