@@ -1,9 +1,11 @@
 #If VBA7 Then
 Private Declare PtrSafe Function SetForegroundWindow _
         Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
+Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
 #Else
 Private Declare Function SetForegroundWindow _
         Lib "user32" (ByVal hWnd As Long) As Long
+Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
 #End If
 ' --------------------------------------------------
 '
@@ -432,6 +434,18 @@ Private Sub LogSkippedItem(ByVal logPath As String, ByVal itemSubject As String,
     End If
 End Sub
 
+'--- helper: always create a unique temp MHT name
+Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
+    Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim base$, try$
+    base = Environ$("TEMP") & "\" & Format(ItemDate(mi), "yyyymmdd-hhnnss") _
+           & "_" & CleanFile(mi.Subject)
+    Do
+        try = Left$(base, 200) & "_" & Hex(Timer * 1000) & ext   ' <= always unique
+    Loop While fso.FileExists(try)
+    GetUniqueTempMHT = try
+End Function
+
 
 'Save selected Outlook messages as PDFs – quiet & with headers
 Sub SaveMails_ToPDF_Background()
@@ -541,7 +555,7 @@ Sub SaveMails_ToPDF_Background()
             If Len(safeSubj) > room Then safeSubj = Left$(safeSubj, room)
 
             ' Build the final, safe filenames
-            tmpFile = Environ$("TEMP") & "\" & datePrefix & "_" & safeSubj & tmpExt
+            tmpFile = GetUniqueTempMHT(mailItem, tmpExt)
             pdfFile = tgtFolder & datePrefix & " – " & safeSubj & ".pdf"
 
 
@@ -590,6 +604,20 @@ Sub SaveMails_ToPDF_Background()
                 doc.Range.InsertBefore hdr
             End If
             
+            '--- NEW: Slice away the quoted reply thread before saving to PDF ---
+            ' This happens on the temporary MHT file, so the original email is not changed.
+            With doc.Range
+                Dim p As Long
+                ' Find the start of the typical reply separator
+                p = InStr(1, .Text, "-----Original Message-----", vbTextCompare)
+                If p > 0 Then
+                    ' If found, create a new range from that point to the end of the document and delete it.
+                    Dim rngToDelete As Object ' Word.Range
+                    Set rngToDelete = doc.Range(Start:=.Characters(p).Start, End:=doc.Content.End)
+                    rngToDelete.Delete
+                End If
+            End With
+            
             '--- 4  export to PDF & clean up --------------------------
 
             ' *** FIX: Ensure the target file is writable before exporting. ***
@@ -605,6 +633,7 @@ Sub SaveMails_ToPDF_Background()
             ' *** UPDATE: Use explicit OptimizeFor:=0 parameter ***
             doc.ExportAsFixedFormat OutputFileName:=pdfFile, ExportFormat:=wdExportFormatPDF, OptimizeFor:=0
             doc.Close False
+            DoEvents: Sleep 150         'steady 0.15 s is usually enough
             
             ' *** FIX: This is the key change. By setting doc to Nothing immediately after closing, ***
             ' *** we prevent the cleanup block at 'NextItemInLoop' from trying to close it again. ***
