@@ -246,9 +246,9 @@ Sub SaveAsPDFfile()
 
             Const MAX_PATH As Long = 260              'official value
 
-            '1.  Trim quoted thread, render, and grab live Word.Document
+            '1. Trim quoted thread, render, and grab live Word.Document
             oMail.HTMLBody = StripQuotedBody(oMail)    'update body in place
-            oMail.Display False                        'builds WordEditor invisibly
+            oMail.Display False                        'forces Word to build editor
             Set objDoc = oMail.GetInspector.WordEditor
 
             '2.  Build the unique PDF name
@@ -272,7 +272,8 @@ Sub SaveAsPDFfile()
                     OutputFileName:=sFileName, _
                     ExportFormat:=wdExportFormatPDF, _
                     OptimizeFor:=wdExportOptimizeForPrint, _
-                    Range:=wdExportAllDocument, Item:=wdExportDocumentContent, _
+                    Range:=wdExportAllDocument, _
+                    Item:=wdExportDocumentContent, _
                     CreateBookmarks:=wdExportCreateNoBookmarks
             End If
 
