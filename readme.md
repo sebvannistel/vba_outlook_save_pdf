@@ -48,6 +48,21 @@ Transform your Outlook into a powerful email-to-PDF converter in a few simple st
 
 ![Demonstration](images/demo.gif)
 
+## Special message types
+
+Certain Outlook messages are worth keeping in their own PDF even if they share a
+conversation topic.  The macro uses their `MessageClass` (and sometimes a
+subject prefix) to detect them:
+
+1. **Message recall** – `IPM.Outlook.Recall` or `IPM.Recall.Report`
+2. **Delivery-status notices** – `REPORT.IPM.NOTE.*` or `REPORT.IPM.SCHEDULE.*`
+3. **Read / Non-read receipts** – `REPORT.IPM.NOTE.IPNRN` / `REPORT.IPM.NOTE.IPNNRN`
+4. **Out-of-office / automatic replies** – subject includes `Automatic reply:` or class `IPM.Note.Rules.OofTemplate*`
+5. **Meeting-related mail** – `IPM.Schedule.Meeting.*`
+6. **Voting-button responses** – the reply subject begins with the chosen option
+7. **Task delegation & updates** – `IPM.TaskRequest.*`
+8. **Encrypted S/MIME reports** – `REPORT.IPM.NOTE.SMIME.*`
+
 ## License
 
 This tool is freely distributed under the [MIT License](LICENSE), promoting open and unrestricted use while encouraging contributions and modifications.
