@@ -530,105 +530,101 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     On Error GoTo 0
 End Sub
 
-
 ' =========================================================================================
-' === REVISED, STABLE MAIN PROCEDURE                                                    ===
+' === FINAL, ROBUST MAIN PROCEDURE (WITH ALL SAFETY CHECKS)                             ===
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
     Const olDiscard As Long = 1
     Const wdExportFormatPDF As Long = 17
-    Const MAX_PATH As Long = 259 ' Windows API limit for full file paths
+    Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
     Dim mailItem As Outlook.MailItem
-    Dim mailInspector As Outlook.Inspector ' Kept for reference, but not used in MHT method
-
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
 
-    ' --- INITIALIZE ---
     On Error GoTo ErrorHandler
 
-    ' Step 1: Get target folder using the STABLE native dialog
-    ' Note: Using "C:\Temp" as a default starting point.
+    ' Step 1: Get target folder
     tgtFolder = AskForTargetFolder("C:\Temp")
-    If Len(tgtFolder) = 0 Then Exit Sub ' User cancelled
+    If Len(tgtFolder) = 0 Then Exit Sub
 
-    ' Step 2: Get selections and create worker objects
+    ' Step 2: Get selections
     Set sel = Application.ActiveExplorer.Selection
     total = sel.Count
-    If total = 0 Then GoTo Cleanup
+    If total = 0 Then
+        MsgBox "Please select one or more emails to save.", vbInformation, "No Items Selected"
+        GoTo Cleanup
+    End If
 
+    ' Step 3: Initialize worker objects
     Set fso = CreateObject("Scripting.FileSystemObject")
     logFilePath = tgtFolder & "_SkippedItems_" & Format(Now, "yyyymmdd_hhnnss") & ".log"
 
     Set wrd = CreateObject("Word.Application")
     wrd.Visible = False
-    wrd.DisplayAlerts = 0 ' Suppress Word's own popups
-    Set objWord = wrd     ' Make Word object available to older helper functions if needed
+    wrd.DisplayAlerts = 0
+    Set objWord = wrd
 
     '================================================================================
-    '--- MAIN EXPORT LOOP (STABILIZED) ---
+    '--- MAIN EXPORT LOOP ---
     '================================================================================
     Dim item As Object
     Dim progressCounter As Long
     
-    Application.StatusBar = "Preparing to save " & total & " selected email(s)..."
+    ' *** SAFETY CHECK: Only set status bar if an Explorer window is active ***
+    If Not Application.ActiveExplorer Is Nothing Then
+        Application.ActiveExplorer.StatusBar = "Preparing to save " & total & " selected email(s)..."
+    End If
 
     For Each item In sel
         progressCounter = progressCounter + 1
-        ' STABILITY FIX: Add DoEvents to prevent freezing and update status
         If progressCounter Mod 5 = 0 Then DoEvents
-        Application.StatusBar = "Processing " & progressCounter & " of " & total & "..."
+        
+        ' *** SAFETY CHECK: Only set status bar if an Explorer window is active ***
+        If Not Application.ActiveExplorer Is Nothing Then
+            Application.ActiveExplorer.StatusBar = "Processing " & progressCounter & " of " & total & "..."
+        End If
         
         If TypeOf item Is Outlook.MailItem Then
             Set mailItem = item
         Else
-            ' Log and skip non-mail items
             skipped = skipped + 1
             LogSkippedItem logFilePath, "Unknown Item Type", "Item in selection was not a mail item."
             GoTo NextItem
         End If
 
-        ' Use the MHT method as it is more stable than GetInspector
         Dim tmpMht As String, pdfFile As String, baseName As String
         On Error Resume Next
         
-        ' 1. Build filenames
+        ' Build filenames and de-duplicate
         tmpMht = GetUniqueTempMHT(mailItem, ".mht")
         baseName = Format(ItemDate(mailItem), "yyyymmdd-hhnnss") & " – " & CleanFile(mailItem.Subject)
         
-        ' ... add path length check here ...
-        ' Truncate baseName to ensure the full path with a potential suffix does not exceed MAX_PATH
-        If Len(tgtFolder & baseName & ".pdf") >= MAX_PATH Then
+        If Len(tgtFolder & baseName & "_99.pdf") >= MAX_PATH Then
             Dim room As Long
-            ' Reserve space for a suffix like "_99.pdf" (7 chars) to avoid path-too-long errors during de-duplication
             room = MAX_PATH - Len(tgtFolder) - 7
             If room > 0 Then
                 baseName = Left$(baseName, room)
             Else
-                 ' Handle case where target folder path is already too long to create any file
                  LogSkippedItem logFilePath, mailItem.Subject, "Target folder path is too long to create a valid filename."
                  skipped = skipped + 1
                  GoTo NextItem
             End If
         End If
         
-        ' DATA LOSS RISK FIX: De-duplicate filename to prevent silently overwriting existing files.
         Dim dupCounter As Long
         pdfFile = tgtFolder & baseName & ".pdf"
         dupCounter = 1
-        ' The fso object is created at the start of the sub
         Do While fso.FileExists(pdfFile)
-            ' If file exists, append a suffix and check again
             pdfFile = tgtFolder & baseName & "_" & dupCounter & ".pdf"
             dupCounter = dupCounter + 1
         Loop
 
-        ' 2. Save to MHT
+        ' Save to MHT and export
         mailItem.SaveAs tmpMht, olMHTML
         If Err.Number <> 0 Then
             Err.Clear
@@ -637,7 +633,6 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
         
-        ' 3. Open in Word, process, and export
         Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
         If Err.Number <> 0 Then
              Err.Clear
@@ -646,13 +641,10 @@ Sub SaveAsPDFfile()
              GoTo NextItem
         End If
         
-        ' The helper functions are available from the original code
         Call InjectFullHeader(doc, mailItem)
         Call TrimQuotedContent(doc)
-        
         doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
-        ' ... update counters (done/skipped) ...
         If Err.Number <> 0 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
             skipped = skipped + 1
@@ -661,27 +653,20 @@ Sub SaveAsPDFfile()
             done = done + 1
         End If
 
-' ================================================================================
-' === CRITICAL FIX: The cleanup block for EACH loop iteration                  ===
-' ================================================================================
 NextItem:
-        ' The CORRECT cleanup order: child objects first, then parents.
+        ' Per-item cleanup
         If Not doc Is Nothing Then
-            doc.Close False ' Close the Word doc without saving changes
+            doc.Close False
             Set doc = Nothing
         End If
-        
-        ' The MHT file is no longer tied to an inspector, so we just delete it
         If Len(tmpMht) > 0 And fso.FileExists(tmpMht) Then
             fso.DeleteFile tmpMht, True
         End If
-
-        ' Release the mail item object for this loop
         Set mailItem = Nothing
-        tmpMht = "" ' Clear the temp file path
+        tmpMht = ""
     Next item
 
-    ' --- FINAL CLEANUP ---
+    ' --- FINAL MESSAGE ---
     Dim msg As String
     msg = done & " mail(s) successfully saved as PDF to " & vbCrLf & tgtFolder
     If skipped > 0 Then
@@ -690,24 +675,22 @@ NextItem:
     MsgBox msg, vbInformation, "Export Complete"
 
 Cleanup:
-    ' -- Safely reset status bars in Word and Outlook --
+    ' -- This block is now fully robust --
     On Error Resume Next
-
-    ' *** THE FIX: Only interact with the 'wrd' object IF it has been created ***
+    
+    ' Safely clear Word's status bar
     If Not wrd Is Nothing Then
-        wrd.StatusBar = False ' Clears Word's status bar
+        wrd.StatusBar = False
     End If
 
     ' Safely clear Outlook's status bar
     If Not Application.ActiveExplorer Is Nothing Then
         Application.ActiveExplorer.StatusBar = ""
     End If
-
-    On Error GoTo 0 ' Resume normal error handling
-
-    On Error Resume Next
+    
+    ' Safely quit Word and release all objects
     If Not wrd Is Nothing Then wrd.Quit
-    ' ... release all other objects ...
+    
     Set wrd = Nothing: Set fso = Nothing: Set sel = Nothing
     Set doc = Nothing: Set mailItem = Nothing: Set objWord = Nothing
     Exit Sub
