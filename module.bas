@@ -325,11 +325,24 @@ End Sub
 
 Private Function CleanSubject(raw As String) As String
     Static rePfx As Object, reBad As Object
+
     If rePfx Is Nothing Then
-        Set rePfx = CreateObject("vbscript.regexp")
-        rePfx.Pattern = "^(?i:\s*(re|fw|fwd)\s*:)+"
-        Set reBad = CreateObject("vbscript.regexp")
-        reBad.Pattern = "[\\/:*?""<>|]"
+        '--- 1) prefix stripper ------------------------------------
+        Set rePfx = CreateObject("VBScript.RegExp")
+        With rePfx
+            .Global = True            'remove every prefix found
+            .IgnoreCase = True        'case-insensitive match
+            .Pattern = "^\s*((re|fw|fwd)\s*:)+\s*"
+        End With
+
+        '--- 2) illegal Windows-filename chars ---------------------
+        Set reBad = CreateObject("VBScript.RegExp")
+        With reBad
+            .Global = True
+            .Pattern = "[\\/:*?""<>|]"
+        End With
     End If
-    CleanSubject = Trim$(reBad.Replace(rePfx.Replace(raw, ""), ""))
+
+    'Guard against NULL subjects  
+    CleanSubject = Trim$(reBad.Replace(rePfx.Replace(CStr(raw), ""), ""))
 End Function
