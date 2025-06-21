@@ -118,6 +118,16 @@ Private Function CleanFile(s As String) As String
     CleanFile = Trim$(s)
 End Function
 
+'--- NEW ATTACHMENT HELPER FUNCTION ---
+Private Function AttachmentList(m As Outlook.MailItem) As String
+    Dim tmp As String, i As Long
+    For i = 1 To m.Attachments.Count
+        tmp = tmp & m.Attachments(i).FileName & _
+              IIf(i < m.Attachments.Count, "; ", "")
+    Next i
+    AttachmentList = tmp
+End Function
+
 '--- HELPER: Injects a simple header that looks like Outlook's print style ---
 Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error Resume Next ' In case a property is not available
@@ -127,6 +137,7 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
           "To: " & m.To & vbCrLf & _
           IIf(Len(m.CC) > 0, "Cc: " & m.CC & vbCrLf, "") & _
           "Subject: " & m.Subject & vbCrLf & _
+          IIf(m.Attachments.Count > 0, "Attachments: " & AttachmentList(m) & vbCrLf, "") & _
           String(60, "—") & vbCrLf & vbCrLf
     doc.Range.InsertBefore hdr
     On Error GoTo 0
@@ -142,6 +153,7 @@ Private Sub InjectFullHeader(doc As Object, m As Outlook.MailItem)
           IIf(Len(m.CC) > 0, "Cc:   " & m.CC & vbCrLf, "") & _
           IIf(Len(m.BCC) > 0, "Bcc:  " & m.BCC & vbCrLf, "") & _
           "Subject: " & m.Subject & vbCrLf & _
+          IIf(m.Attachments.Count > 0, "Attachments: " & AttachmentList(m) & vbCrLf, "") & _
           String(60, "—") & vbCrLf & vbCrLf
           
     ' FIX #3: Guard against double-inserting your own header
@@ -178,7 +190,7 @@ Private Sub SafeClearStatusBar()
     On Error GoTo 0
 End Sub
 
-'--- helper: always create a unique temp file name (MHT, HTM, etc.)
+'--- helper: always create a unique temp MHT name
 Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     Dim base$, try$
@@ -191,38 +203,50 @@ Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As Stri
     GetUniqueTempMHT = try
 End Function
 
-' MODIFIED FUNCTION - Strips quoted replies from the HTMLBody BEFORE saving to MHT.
+' NEW FUNCTION - Strips quoted replies from the HTMLBody BEFORE saving to MHT.
 ' This is the primary fix for preventing conversation history in PDFs.
-Private Function StripQuotedBody(mi As Outlook.MailItem) As String
-    Dim html$, re As Object, m As Object, pat As String
-    html = mi.HTMLBody
-    If Len(html) = 0 Then Exit Function   'nothing to do
+Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
+    Dim body As String
+    Dim patterns As Variant
+    Dim pat As Variant
+    Dim pos As Long
+    Dim firstSeparatorPos As Long
+    
+    body = mailItem.HTMLBody
+    If Len(body) = 0 Then
+        StripQuotedBody = "" ' Return empty if body is empty
+        Exit Function
+    End If
+    
+    ' These patterns identify the start of a replied/forwarded message.
+    ' The function finds the EARLIEST match and trims from that point onwards.
+    ' This array can be extended with other language-specific separators.
+    patterns = Array( _
+        "<div class=""OutlookMessageHeader"">", _
+        "<hr", _
+        "-----Original Message-----", _
+        "<div class=3D""gmail_quote"">", _
+        "<blockquote>" _
+    )
+    
+    ' Using 0 as "not found"
+    firstSeparatorPos = 0
 
-    ' UPDATE: Per review, use VBScript-safe RegExp pattern.
-    ' This finds the first major reply/forward block.
-    pat = "(<div[^>]*outlookmessageheader[^>]*>)|" & _
-          "(<div[^>]*gmail_quote[^>]*>)|" & _
-          "(<div[^>]*gmail_attr[^>]*>)|" & _
-          "(<hr[^>]*>)|" & _
-          "(--+\s*Original Message\s*--+)|" & _
-          "(--+\s*Forwarded message\s*--+)|" & _
-          "^\s*On[\s\S]*wrote:" & "|" & _
-          "^\s*Von:[\s\S]*Gesendet:" & "|" & _
-          "^\s*Le[\s\S]*a écrit :"
-
-    Set re = CreateObject("VBScript.RegExp")
-    With re
-        .Pattern = pat
-        .Global = False
-        .IgnoreCase = True
-        .MultiLine = True ' Required for ^ to match start of line
-    End With
-
-    If re.Test(html) Then
-        Set m = re.Execute(html)(0)
-        StripQuotedBody = Left$(html, m.FirstIndex)
+    ' Loop through each pattern to find the one that appears EARLIEST
+    For Each pat In patterns
+        pos = InStr(1, body, CStr(pat), vbTextCompare)
+        If pos > 0 Then
+            If firstSeparatorPos = 0 Or pos < firstSeparatorPos Then
+                firstSeparatorPos = pos
+            End If
+        End If
+    Next pat
+    
+    ' If a separator was found, truncate the string. Otherwise, return the original.
+    If firstSeparatorPos > 0 Then
+        StripQuotedBody = Left(body, firstSeparatorPos - 1)
     Else
-        StripQuotedBody = html
+        StripQuotedBody = body
     End If
 End Function
 
@@ -246,8 +270,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     patterns = Array( _
         "[-]{5,}Original Message[-]{5,}", _
         "From:*Sent:*To:*Subject:*", _
-        "<div class=3D""outlookmessageheader""[^>]*>", _
-        "<div class=3D""gmail_quote""[^>]*>", _
+        "<div class=3D""gmail_quote"">", _
         "[<]hr[!>]*[>]", _
         "<blockquote*>" _
     )
@@ -270,8 +293,7 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             If .Execute = True Then
                 ' Safety check: don't trim if the separator is at the very top
                 ' (e.g., the main "From:" line of the original email).
-                ' MODIFIED LINE
-                If findRange.Start > 40 Then
+                If findRange.Start > 200 Then
                     ' If this is the first separator found, or if it's earlier
                     ' than the previous best, record its position.
                     If firstSeparatorPos = -1 Or findRange.Start < firstSeparatorPos Then
@@ -297,8 +319,7 @@ End Sub
 Sub SaveAsPDFfile()
     ' --- SETUP ---
     Const wdExportFormatPDF As Long = 17
-    ' UPDATE: Per review, corrected max path length for Windows
-    Const MAX_PATH As Long = 258
+    Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
     Dim sel As Outlook.Selection
@@ -306,10 +327,6 @@ Sub SaveAsPDFfile()
     Dim mailItem As Outlook.MailItem
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
-    ' --- Variables for review fixes ---
-    Dim htmlToProcess As String, tempHtmFile As String, msPart As String
-    Dim isPlainText As Boolean, stream As Object
-    Dim dupCounter As Long
 
     On Error GoTo ErrorHandler
 
@@ -334,13 +351,14 @@ Sub SaveAsPDFfile()
         GoTo Cleanup
     End If
 
-    ' FIX #1: This section now filters by a more robust key to ensure each unique mail is
-    ' processed, solving the "one-per-conversation" and cross-store duplicate problems.
+    ' FIX #1: This section now filters by EntryID to ensure each unique mail is
+    ' processed, solving the "one-per-conversation" problem.
     '-----------------------------------------------------------------
     Dim latest As Object
     Set latest = CreateObject("Scripting.Dictionary")
     
-    If latest Is Nothing Then
+    ' *** UPDATE #1: Add a creation guard immediately after you build the dictionary ***
+    If latest Is Nothing Then                     ' -- COM failed (scrrun.dll not registered)
         MsgBox "Could not create Scripting.Dictionary – check scrrun.dll registration.", vbCritical
         Exit Sub
     End If
@@ -349,23 +367,11 @@ Sub SaveAsPDFfile()
 
     ' This loop ensures every unique email you selected is included for export.
     For Each it In sel
-        ' === HIGH-IMPACT FIX #1: USE A MORE STABLE, CROSS-STORE KEY ===
-        ' Use ConversationIndex as the primary key because it is stable when
-        ' moving/copying items. Fall back to EntryID for items that lack it.
-        On Error Resume Next
-        k = "" ' Initialize k
-        k = it.ConversationIndex
-        If Err.Number <> 0 Or Len(k) = 0 Then
-            Err.Clear
-            k = it.EntryID
-        End If
-        On Error GoTo 0 ' Reset local error handling. The main handler remains active.
-
+        k = it.EntryID                 ' <- unique key per message
         If Not latest.Exists(k) Then
             latest.Add k, it
         End If
     Next it
-    On Error GoTo ErrorHandler ' Ensure main handler is active for subsequent code
     '-----------------------------------------------------------------
 
     total = latest.Count ' Use the count of the filtered list
@@ -378,16 +384,21 @@ Sub SaveAsPDFfile()
     Dim failedStep As String
 
     On Error Resume Next ' Temporarily disable the main error handler
+
     failedStep = "CreateObject(""Word.Application"")"
     Set wrd = CreateObject("Word.Application")
     If Err.Number <> 0 Then GoTo WordCreationFailed
+
     failedStep = "wrd.Visible = False"
     wrd.Visible = False
     If Err.Number <> 0 Then GoTo WordCreationFailed
+
     failedStep = "wrd.DisplayAlerts = 0"
     wrd.DisplayAlerts = 0
     If Err.Number <> 0 Then GoTo WordCreationFailed
+
     On Error GoTo ErrorHandler ' Restore the main error handler
+
     Set objWord = wrd
     ' --- END OF DIAGNOSTIC BLOCK ---
 
@@ -397,17 +408,23 @@ Sub SaveAsPDFfile()
     Dim item As Variant
     Dim progressCounter As Long
     
+    ' *** UPDATED: Set status bar only if Explorer is active and property exists ***
     If Not Application.ActiveExplorer Is Nothing Then
-        On Error Resume Next
+        On Error Resume Next ' In case .StatusBar is deprecated or causes an error
         Application.ActiveExplorer.StatusBar = "Preparing to save " & total & " selected email(s)..."
         On Error GoTo 0
     End If
 
+    ' *** UPDATE #2: Add a type-safety guard *right before* the For Each loop ***
+    '— sanity check: has <latest> been clobbered in the meantime? —
     If Not (TypeName(latest) = "Dictionary") Then
         MsgBox "Internal error – variable <latest> is no longer a Dictionary.", vbCritical
         Exit Sub
     End If
 
+    ' --- FIX: Prevent Run-time error 424 because latest.Items is Empty ---
+    ' This guard ensures the loop is only attempted if the dictionary
+    ' contains items. If the count is 0, we jump to the cleanup section.
     If latest.Count = 0 Then
         MsgBox "Nothing to export – the filter removed every item.", vbInformation
         GoTo Cleanup
@@ -418,8 +435,9 @@ Sub SaveAsPDFfile()
         progressCounter = progressCounter + 1
         If progressCounter Mod 5 = 0 Then DoEvents
         
+        ' *** UPDATED: Set status bar only if Explorer is active and property exists ***
         If Not Application.ActiveExplorer Is Nothing Then
-            On Error Resume Next
+            On Error Resume Next ' In case .StatusBar is deprecated or causes an error
             Application.ActiveExplorer.StatusBar = "Processing " & progressCounter & " of " & total & "..."
             On Error GoTo 0
         End If
@@ -432,59 +450,19 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
 
-        ' === HIGH-IMPACT FIX #3: PROCESS HTML IN MEMORY AND WRITE TO A TEMP FILE ===
-        ' This avoids modifying the original Outlook MailItem, making the process safer.
-        If Len(mailItem.HTMLBody) > 0 Then
-            htmlToProcess = StripQuotedBody(mailItem) ' Trim reply chains from HTML
-            isPlainText = False
-        Else
-            ' Fallback to plain text body if HTMLBody is empty
-            Dim parts: parts = Split(mailItem.Body, "-----") ' Use existing logic for splitting
-            htmlToProcess = parts(0)
-            isPlainText = True
-        End If
-        
-        If Len(Trim$(htmlToProcess)) = 0 Then
-            skipped = skipped + 1
-            LogSkippedItem logFilePath, mailItem.Subject, "Email body was empty after trimming."
-            GoTo NextItem
-        End If
-        
-        ' Wrap the content in a full HTML structure for Word to open correctly.
-        If isPlainText Then
-            htmlToProcess = Replace(htmlToProcess, "&", "&")
-            htmlToProcess = Replace(htmlToProcess, "<", "<")
-            htmlToProcess = Replace(htmlToProcess, ">", ">")
-            htmlToProcess = "<html><head><meta http-equiv=""Content-Type"" content=""text/html; charset=utf-8""></head><body><pre>" & htmlToProcess & "</pre></body></html>"
-        Else
-            If InStr(1, LCase(htmlToProcess), "<html") = 0 Then
-                htmlToProcess = "<html><head><meta http-equiv=""Content-Type"" content=""text/html; charset=utf-8""></head><body>" & htmlToProcess & "</body></html>"
-            End If
+        '🟢 NEW – cut the quoted thread BEFORE saving the .mht
+        mailItem.HTMLBody = StripQuotedBody(mailItem)
+        'Fallback to plain-text bodies
+        If Len(mailItem.HTMLBody) = 0 Then
+            mailItem.Body = Split(mailItem.Body, vbCrLf & vbCrLf & "-----")(0)
         End If
 
-        Dim pdfFile As String, baseName As String
+        Dim tmpMht As String, pdfFile As String, baseName As String
         On Error Resume Next
         
-        ' Get a unique name for the temporary HTM file.
-        tempHtmFile = GetUniqueTempMHT(mailItem, ".htm")
-
-        ' Write our generated HTML string to the temp file.
-        Set stream = fso.CreateTextFile(tempHtmFile, True, True) ' Create, Overwrite, Unicode=True
-        stream.Write htmlToProcess
-        stream.Close
-        Set stream = Nothing
-
-        If Err.Number <> 0 Then
-            Err.Clear
-            LogSkippedItem logFilePath, mailItem.Subject, "Failed to create temporary HTM file."
-            skipped = skipped + 1
-            GoTo NextItem
-        End If
-        
         ' Build filenames and de-duplicate
-        ' === HIGH-IMPACT FIX #2: ADD MILLISECONDS TO FILENAME TO PREVENT COLLISIONS ===
-        msPart = Right$("000" & CStr(Int(Timer * 1000) Mod 1000), 3)
-        baseName = Format(ItemDate(mailItem), "yyyymmdd-hhnnss") & "-" & msPart & " – " & CleanFile(mailItem.Subject)
+        tmpMht = GetUniqueTempMHT(mailItem, ".mht")
+        baseName = Format(ItemDate(mailItem), "yyyymmdd-hhnnss") & " – " & CleanFile(mailItem.Subject)
         
         If Len(tgtFolder & baseName & "_99.pdf") >= MAX_PATH Then
             Dim room As Long
@@ -498,6 +476,7 @@ Sub SaveAsPDFfile()
             End If
         End If
         
+        Dim dupCounter As Long
         pdfFile = tgtFolder & baseName & ".pdf"
         dupCounter = 1
         Do While fso.FileExists(pdfFile)
@@ -505,31 +484,35 @@ Sub SaveAsPDFfile()
             dupCounter = dupCounter + 1
         Loop
 
-        ' The original mailItem.SaveAs is no longer needed. We open the HTM file directly.
+        ' Save to MHT and export
+        mailItem.SaveAs tmpMht, olMHTML
+        If Err.Number <> 0 Then
+            Err.Clear
+            LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHT (IRM protected or locked)."
+            skipped = skipped + 1
+            GoTo NextItem
+        End If
         
-1000:   Set doc = wrd.Documents.Open(tempHtmFile, ReadOnly:=True, Visible:=False)
+        ' *** UPDATE #3: Add colons to numeric labels ***
+1000:   Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
         If Err.Number <> 0 Then
              Err.Clear
-             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the temporary HTM file."
+             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
              skipped = skipped + 1
              GoTo NextItem
         End If
 
-        ' These calls operate on the Word document, not the email.
-1010:   Call TrimQuotedContent(doc)
-1020:   Call InjectFullHeader(doc, mailItem)
-        
+1010:   Call InjectFullHeader(doc, mailItem)
+1020:   Call TrimQuotedContent(doc)
 1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
-            LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export HTM to PDF. Error: " & Err.Description
+            LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
             skipped = skipped + 1
             Err.Clear
         Else
             done = done + 1
         End If
-
-        ' The original item was never modified, so there is nothing to restore.
 
 NextItem:
         ' Per-item cleanup
@@ -537,16 +520,11 @@ NextItem:
             doc.Close False
             Set doc = Nothing
         End If
-        
-        ' Clean up the temporary HTM file
-        On Error Resume Next
-        If Len(tempHtmFile) > 0 And fso.FileExists(tempHtmFile) Then
-            fso.DeleteFile tempHtmFile, True
+        If Len(tmpMht) > 0 And fso.FileExists(tmpMht) Then
+            fso.DeleteFile tmpMht, True
         End If
-        On Error GoTo ErrorHandler ' Restore the main error handler for the next loop iteration
-        
         Set mailItem = Nothing
-        tempHtmFile = ""
+        tmpMht = ""
     Next item
 
     ' --- FINAL MESSAGE ---
@@ -574,7 +552,6 @@ Cleanup:
     
     Set wrd = Nothing: Set fso = Nothing: Set sel = Nothing
     Set doc = Nothing: Set mailItem = Nothing: Set objWord = Nothing
-    Set stream = Nothing
     Exit Sub
 
 WordCreationFailed:
