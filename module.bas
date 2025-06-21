@@ -192,6 +192,9 @@ End Sub
 
 '--- helper: always create a unique temp MHT name
 Private Function GetUniqueTempMHT(mi As Outlook.MailItem, ext As String) As String
+    ' OPTIONAL POLISH (from checklist item #3): Seed the random number generator.
+    Randomize
+    
     Dim fso As Object: Set fso = CreateObject("Scripting.FileSystemObject")
     Dim base$, try$
     base = Environ$("TEMP") & "\" & Format(ItemDate(mi), "yyyymmdd-hhnnss") _
@@ -266,8 +269,15 @@ Private Sub SaveHtmlToMht(ByVal html As String, ByVal mhtPath As String, wrd As 
     End With
 
     Set docTmp = wrd.Documents.Open(tmpHtml, ReadOnly:=True, Visible:=False)
-    docTmp.SaveAs2 mhtPath, 10   '10 = wdFormatWebArchive (MHT)
+    
+    ' REQUIRED FIX (from checklist item #1): Use 9 for MHT, not 10.
+    docTmp.SaveAs2 mhtPath, 9   '9 = wdFormatWebArchive
+    
     docTmp.Close False
+    
+    ' OPTIONAL POLISH (from checklist item #4): Release object before file operation.
+    Set docTmp = Nothing
+    
     Kill tmpHtml
 End Sub
 
@@ -336,7 +346,7 @@ End Sub
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
-    Const wdExportFormatPDF As Long = 17
+    ' REQUIRED FIX (from checklist item #2): Removed duplicate Const definition. It is now only defined once at the module level.
     Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
