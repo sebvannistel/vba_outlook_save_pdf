@@ -24,6 +24,7 @@ Option Explicit
 
 Private Const wdExportFormatPDF As Long = 17     'moved to module level
 Private Const olMHTML As Long = 10               'Added for late-binding
+Private Const wdStatisticPages As Long = 2       'For readability, avoids magic number
 
 Private objWord As Object
 
@@ -242,7 +243,7 @@ Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
     For Each pat In patterns
         pos = InStr(1, body, CStr(pat), vbTextCompare)
         ' The length guard prevents early matches from wiping the entire email.
-        If pos > 400 Then   ' <-- skip early matches that would wipe the whole mail
+        If pos > 250 Then   ' <-- UPDATED: skip early matches that would wipe the whole mail
             If firstSeparatorPos = 0 Or pos < firstSeparatorPos Then
                 firstSeparatorPos = pos
             End If
@@ -533,7 +534,7 @@ Sub SaveAsPDFfile()
         ' === FIX STEP 2 & 3: DIAGNOSTIC & FAIL-SAFE (as per instructions)     ===
         ' This proves the body is being wiped and prevents Word from receiving
         ' an empty string, which causes the dead-lock.
-        Debug.Print mailItem.Subject, Len(cleanHtml)
+        ' Debug.Print mailItem.Subject, Len(cleanHtml)
         
         If Len(cleanHtml) < 100 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Body trimmed to <100 chars; skipped."
@@ -569,12 +570,13 @@ Sub SaveAsPDFfile()
 1010:   Call InjectFullHeader(doc, mailItem)
 1020:   Call TrimQuotedContent(doc) ' This now serves as a secondary safety net
 
-        '--- WAIT until Word has paginated; otherwise ExportAsFixedFormat grabs a blank doc
-        Do
-            DoEvents                   'yield to Word’s layout engine
-            On Error Resume Next
-        Loop While doc.ComputeStatistics(2) = 0   '2 = wdStatisticPages
-        On Error GoTo 0                           'restore normal trapping
+        '–-–- NEW: force and wait for pagination (as per instructions) –-–-
+        doc.Repaginate                          ' Forces layout
+        DoEvents
+        Do While doc.ComputeStatistics(wdStatisticPages) = 0
+            DoEvents
+        Loop
+        '–-–- END NEW –-–-
 
 1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
