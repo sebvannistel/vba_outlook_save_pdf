@@ -1,12 +1,12 @@
-'#If VBA7 Then
-    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
-    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
+#If VBA7 Then
+    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As Long
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As Long)
     Private Declare PtrSafe Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
-'#Else
-'    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
-'    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
-'    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
-'#End If
+#Else
+    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
+    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
+    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+#End If
 ' --------------------------------------------------
 '
 ' Outlook macro to save a selected item(s) as pdf
@@ -318,7 +318,6 @@ End Sub
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
-    Const wdExportFormatPDF As Long = 17
     Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
