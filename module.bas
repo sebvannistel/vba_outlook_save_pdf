@@ -224,12 +224,15 @@ Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
     ' These patterns identify the start of a replied/forwarded message.
     ' The function finds the EARLIEST match and trims from that point onwards.
     ' This array can be extended with other language-specific separators.
+    ' ========================================================================
+    ' === FIX 3.1: PATTERN ORDER CHANGED & GUARD ADDED (as per instructions) ===
+    ' The header-div is now last to prevent premature matches.
     patterns = Array( _
-        "<div class=""OutlookMessageHeader"">", _
-        "<hr", _
         "-----Original Message-----", _
         "<div class=3D""gmail_quote"">", _
-        "<blockquote>" _
+        "<blockquote>", _
+        "<hr", _
+        "<div class=""OutlookMessageHeader"">" _
     )
     
     ' Using 0 as "not found"
@@ -238,12 +241,15 @@ Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
     ' Loop through each pattern to find the one that appears EARLIEST
     For Each pat In patterns
         pos = InStr(1, body, CStr(pat), vbTextCompare)
-        If pos > 0 Then
+        ' The length guard prevents early matches from wiping the entire email.
+        If pos > 400 Then   ' <-- skip early matches that would wipe the whole mail
             If firstSeparatorPos = 0 Or pos < firstSeparatorPos Then
                 firstSeparatorPos = pos
             End If
         End If
     Next pat
+    ' === END OF FIX 3.1 ===
+    ' ======================
     
     ' If a separator was found, truncate the string. Otherwise, return the original.
     If firstSeparatorPos > 0 Then
@@ -509,6 +515,20 @@ Sub SaveAsPDFfile()
         ' This ensures reply history is removed without breaking attachments.
         cleanHtml = StripQuotedBody(mailItem)
 
+        ' ========================================================================
+        ' === FIX STEP 2 & 3: DIAGNOSTIC & FAIL-SAFE (as per instructions)     ===
+        ' This proves the body is being wiped and prevents Word from receiving
+        ' an empty string, which causes the dead-lock.
+        Debug.Print mailItem.Subject, Len(cleanHtml)
+        
+        If Len(cleanHtml) < 100 Then
+            LogSkippedItem logFilePath, mailItem.Subject, "Body trimmed to <100 chars; skipped."
+            skipped = skipped + 1 ' Increment skipped counter
+            GoTo NextItem
+        End If
+        ' === END OF FIX ===
+        ' ========================================================================
+        
         If Len(cleanHtml) > 0 Then
             Call SaveHtmlToMht(cleanHtml, tmpMht, wrd)
         Else
