@@ -22,9 +22,10 @@
 
 Option Explicit
 
-Private Const wdExportFormatPDF As Long = 17     'moved to module level
-Private Const olMHTML As Long = 10               'Added for late-binding
-Private Const wdStatisticPages As Long = 2       'For readability, avoids magic number
+Private Const wdExportFormatPDF As Long = 17       'moved to module level
+Private Const olMHTML As Long = 10                 'Added for late-binding
+Private Const wdStatisticPages As Long = 2         'For readability, avoids magic number
+Private Const wdExportOptimizeForPrint As Long = 0 'For late binding, fixes compile error
 
 Private objWord As Object
 
