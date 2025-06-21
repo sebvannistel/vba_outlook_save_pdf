@@ -340,7 +340,8 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
     Next pat
     
     ' After checking all patterns, if we found a separator, delete from that point.
-    If firstSeparatorPos > -1 Then
+    '— TrimQuotedContent (restore safety) —
+    If firstSeparatorPos > 249 Then
         doc.Range(Start:=firstSeparatorPos, End:=doc.Content.End).Delete
     End If
     
@@ -545,6 +546,8 @@ Sub SaveAsPDFfile()
         ' ========================================================================
         
         If Len(cleanHtml) > 0 Then
+            '— make sure the HTML Word gets is well-formed —
+            cleanHtml = "<html><body>" & cleanHtml & "</body></html>"
             Call SaveHtmlToMht(cleanHtml, tmpMht, wrd)
         Else
             ' Fallback for empty or problematic HTML bodies
@@ -573,12 +576,13 @@ Sub SaveAsPDFfile()
         '–-–- NEW: force and wait for pagination (as per instructions) –-–-
         doc.Repaginate                          ' Forces layout
         DoEvents
-        Do While doc.ComputeStatistics(wdStatisticPages) = 0
-            DoEvents
-        Loop
+        Do While doc.ActiveWindow.Panes(1).Pages.Count = 0: DoEvents: Loop
         '–-–- END NEW –-–-
 
-1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
+        '— export without carrying IRM over —
+        doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF, _
+                OpenAfterExport:=False, OptimizeFor:=wdExportOptimizeForPrint, _
+                KeepIRM:=False
         
         If Err.Number <> 0 Then
             LogSkippedItem logFilePath, mailItem.Subject, "Word failed to export MHT to PDF. Error: " & Err.Description
