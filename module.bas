@@ -568,6 +568,14 @@ Sub SaveAsPDFfile()
 
 1010:   Call InjectFullHeader(doc, mailItem)
 1020:   Call TrimQuotedContent(doc) ' This now serves as a secondary safety net
+
+        '--- WAIT until Word has paginated; otherwise ExportAsFixedFormat grabs a blank doc
+        Do
+            DoEvents                   'yield to Word’s layout engine
+            On Error Resume Next
+        Loop While doc.ComputeStatistics(2) = 0   '2 = wdStatisticPages
+        On Error GoTo 0                           'restore normal trapping
+
 1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
