@@ -274,7 +274,7 @@ Private Sub SaveHtmlToMht(ByVal html As String, ByVal mhtPath As String, wrd As 
         .Close
     End With
 
-    Set docTmp = wrd.Documents.Open(tmpHtml, ReadOnly:=True, Visible:=False)
+    Set docTmp = wrd.Documents.Open(tmpHtml, ReadOnly:=True, Visible:=False, ConfirmConversions:=False)
     
     ' REQUIRED FIX (from checklist item #1): Use 9 for MHT, not 10.
     docTmp.SaveAs2 mhtPath, 9   '9 = wdFormatWebArchive
@@ -352,7 +352,6 @@ End Sub
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
-    ' REQUIRED FIX (from checklist item #2): Removed duplicate Const definition. It is now only defined once at the module level.
     Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
@@ -416,6 +415,7 @@ Sub SaveAsPDFfile()
 
     ' --- DETAILED DIAGNOSTIC FOR WORD OBJECT CREATION ---
     Dim failedStep As String
+    Const msoAutomationSecurityForceDisable As Long = 3 ' For late binding
 
     On Error Resume Next ' Temporarily disable the main error handler
 
@@ -423,13 +423,27 @@ Sub SaveAsPDFfile()
     Set wrd = CreateObject("Word.Application")
     If Err.Number <> 0 Then GoTo WordCreationFailed
 
+    '--- IMPLEMENTING BLUEPRINT STEP 1: The "Fort Knox" Word Setup ---
+    ' Make it invisible (.Visible = False).
     failedStep = "wrd.Visible = False"
     wrd.Visible = False
     If Err.Number <> 0 Then GoTo WordCreationFailed
 
-    failedStep = "wrd.DisplayAlerts = 0"
-    wrd.DisplayAlerts = 0
+    ' Tell it to suppress all alerts (.DisplayAlerts = wdAlertsNone).
+    failedStep = "wrd.DisplayAlerts = 0 (wdAlertsNone)"
+    wrd.DisplayAlerts = 0 ' wdAlertsNone
     If Err.Number <> 0 Then GoTo WordCreationFailed
+
+    ' Disable the "Update Links" prompt (.Options.UpdateLinksAtOpen = False).
+    failedStep = "wrd.Options.UpdateLinksAtOpen = False"
+    wrd.Options.UpdateLinksAtOpen = False
+    If Err.Number <> 0 Then GoTo WordCreationFailed
+
+    ' Force it to disable all security prompts (.AutomationSecurity = msoAutomationSecurityForceDisable).
+    failedStep = "wrd.AutomationSecurity = msoAutomationSecurityForceDisable"
+    wrd.AutomationSecurity = msoAutomationSecurityForceDisable ' Value is 3
+    If Err.Number <> 0 Then GoTo WordCreationFailed
+    '--- END OF BLUEPRINT STEP 1 IMPLEMENTATION ---
 
     On Error GoTo ErrorHandler ' Restore the main error handler
 
@@ -544,7 +558,7 @@ Sub SaveAsPDFfile()
         End If
         
         ' *** UPDATE #3: Add colons to numeric labels ***
-1000:   Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False)
+1000:   Set doc = wrd.Documents.Open(tmpMht, ReadOnly:=True, Visible:=False, ConfirmConversions:=False)
         If Err.Number <> 0 Then
              Err.Clear
              LogSkippedItem logFilePath, mailItem.Subject, "Word failed to open the MHT file."
