@@ -1,12 +1,12 @@
-#If VBA7 Then
-    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As Long
-    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As Long)
+'#If VBA7 Then
+    Private Declare PtrSafe Function SetForegroundWindow Lib "user32" (ByVal hWnd As LongPtr) As LongPtr
+    Private Declare PtrSafe Sub Sleep Lib "kernel32" (ByVal ms As LongPtr)
     Private Declare PtrSafe Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As LongPtr
-#Else
-    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
-    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
-    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
-#End If
+'#Else
+'    Private Declare Function SetForegroundWindow Lib "user32" (ByVal hWnd As Long) As Long
+'    Private Declare Sub Sleep Lib "kernel32" (ByVal ms As Long)
+'    Private Declare Function FindWindowA Lib "user32" (ByVal lpClassName As String, ByVal lpWindowName As String) As Long
+'#End If
 ' --------------------------------------------------
 '
 ' Outlook macro to save a selected item(s) as pdf
@@ -318,6 +318,7 @@ End Sub
 ' =========================================================================================
 Sub SaveAsPDFfile()
     ' --- SETUP ---
+    Const wdExportFormatPDF As Long = 17
     Const MAX_PATH As Long = 259
 
     ' --- OBJECTS & VARIABLES ---
@@ -449,12 +450,9 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
 
-        '🟢 NEW – cut the quoted thread BEFORE saving the .mht
-        mailItem.HTMLBody = StripQuotedBody(mailItem)
-        'Fallback to plain-text bodies
-        If Len(mailItem.HTMLBody) = 0 Then
-            mailItem.Body = Split(mailItem.Body, vbCrLf & vbCrLf & "-----")(0)
-        End If
+        ' >>> CHANGE: The block that modified the MailItem has been removed as per your request.
+        ' The original, unmodified email will be saved, and the quoting will be trimmed
+        ' later by the TrimQuotedContent function inside Word.
 
         Dim tmpMht As String, pdfFile As String, baseName As String
         On Error Resume Next
