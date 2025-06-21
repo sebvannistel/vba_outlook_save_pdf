@@ -73,9 +73,6 @@ subject prefix) to detect them:
 7. **Task delegation & updates** – `IPM.TaskRequest.*`
 8. **Encrypted S/MIME reports** – `REPORT.IPM.NOTE.SMIME.*`
 
-## License
-
-This tool is freely distributed under the [MIT License](LICENSE), promoting open and unrestricted use while encouraging contributions and modifications.
 
 ## ⚠️ Troubleshooting: Resolving Blank PDFs and Freezes
 
@@ -110,3 +107,7 @@ If you encounter this issue, follow these steps to configure Word's Trust Center
 5. **Restart both Word and Outlook** to ensure all changes take effect.
 
 After applying these settings, the macro should now be able to run without interference, correctly generating non-blank PDFs. If issues persist, it may indicate a deeper conflict with enterprise security software (EDR, Antivirus) that requires an IT department to whitelist the automation process.
+
+## License
+
+This tool is freely distributed under the [MIT License](LICENSE), promoting open and unrestricted use while encouraging contributions and modifications.
