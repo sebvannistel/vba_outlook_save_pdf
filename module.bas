@@ -250,8 +250,29 @@ Private Function StripQuotedBody(ByVal mailItem As Outlook.MailItem) As String
     End If
 End Function
 
+' === NEW Helper ===
+Private Sub SaveHtmlToMht(ByVal html As String, ByVal mhtPath As String, wrd As Object)
+    Dim tmpHtml As String, stm As Object, docTmp As Object
+    tmpHtml = Replace(mhtPath, ".mht", ".html")
+
+    Set stm = CreateObject("ADODB.Stream")
+    With stm
+        .Charset = "utf-8"
+        .Type = 2          'text
+        .Open
+        .WriteText html
+        .SaveToFile tmpHtml, 2  'adSaveCreateOverWrite
+        .Close
+    End With
+
+    Set docTmp = wrd.Documents.Open(tmpHtml, ReadOnly:=True, Visible:=False)
+    docTmp.SaveAs2 mhtPath, 10   '10 = wdFormatWebArchive (MHT)
+    docTmp.Close False
+    Kill tmpHtml
+End Sub
+
 '---------------------------------------------------------------------------------------
-' Procedure : TrimQuotedContent (Version 6 - Robust and Corrected)
+' Procedure : TrimQuotedContent (Version 7 - Safer patterns)
 ' Author    : sebvannistel / 2025-06-21
 ' Purpose   : Finds the EARLIEST reply separator in the document across multiple
 '             patterns and deletes all content from that point forward.
@@ -259,20 +280,20 @@ End Function
 Private Sub TrimQuotedContent(ByVal doc As Object)
     On Error Resume Next
     
-    ' FIX #2: Add wdFindStop constant
     Const wdFindStop As Long = 0
     Dim findRange As Object ' Word.Range
     Dim patterns As Variant
     Dim pat As Variant
     Dim firstSeparatorPos As Long
     
-    ' FIX #2: Add new pattern for OWA/Gmail quotes
+    ' UPDATED patterns as per new guidance for better safety
     patterns = Array( _
-        "[-]{5,}Original Message[-]{5,}", _
-        "From:*Sent:*To:*Subject:*", _
-        "<div class=3D""gmail_quote"">", _
-        "[<]hr[!>]*[>]", _
-        "<blockquote*>" _
+       "[-]{5,}Original Message[-]{5,}", _
+       "<div class=""OutlookMessageHeader"">", _
+       "<div class=3D""gmail_quote"">", _
+       "(^|\r)(>+ )?On *[0-9]{4}.*wrote:?", _
+       "<hr[^>]*>", _
+       "<blockquote[^>]*>" _
     )
     
     firstSeparatorPos = -1 ' Initialize to a "not found" state
@@ -284,21 +305,18 @@ Private Sub TrimQuotedContent(ByVal doc As Object)
             .ClearFormatting
             .Text = pat
             .Forward = True
-            ' FIX #2: Change Wrap to wdFindStop to prevent finding the last separator
-            .Wrap = wdFindStop
+            .Wrap = wdFindStop ' Use wdFindStop to prevent finding a later separator
             .Format = False
             .MatchCase = False
             .MatchWildcards = True
             
             If .Execute = True Then
-                ' Safety check: don't trim if the separator is at the very top
-                ' (e.g., the main "From:" line of the original email).
-                If findRange.Start > 200 Then
-                    ' If this is the first separator found, or if it's earlier
-                    ' than the previous best, record its position.
-                    If firstSeparatorPos = -1 Or findRange.Start < firstSeparatorPos Then
-                        firstSeparatorPos = findRange.Start
-                    End If
+                ' Safety check "If findRange.Start > 200" removed as requested.
+                
+                ' If this is the first separator found, or if it's earlier
+                ' than the previous best, record its position.
+                If firstSeparatorPos = -1 Or findRange.Start < firstSeparatorPos Then
+                    firstSeparatorPos = findRange.Start
                 End If
             End If
         End With
@@ -450,11 +468,7 @@ Sub SaveAsPDFfile()
             GoTo NextItem
         End If
 
-        ' >>> CHANGE: The block that modified the MailItem has been removed as per your request.
-        ' The original, unmodified email will be saved, and the quoting will be trimmed
-        ' later by the TrimQuotedContent function inside Word.
-
-        Dim tmpMht As String, pdfFile As String, baseName As String
+        Dim tmpMht As String, pdfFile As String, baseName As String, cleanHtml As String
         On Error Resume Next
         
         ' Build filenames and de-duplicate
@@ -481,8 +495,17 @@ Sub SaveAsPDFfile()
             dupCounter = dupCounter + 1
         Loop
 
-        ' Save to MHT and export
-        mailItem.SaveAs tmpMht, olMHTML
+        ' *** NEW LOGIC: Trim the HTML body BEFORE saving to MHT ***
+        ' This ensures reply history is removed without breaking attachments.
+        cleanHtml = StripQuotedBody(mailItem)
+
+        If Len(cleanHtml) > 0 Then
+            Call SaveHtmlToMht(cleanHtml, tmpMht, wrd)
+        Else
+            ' Fallback for empty or problematic HTML bodies
+            mailItem.SaveAs tmpMht, olMHTML
+        End If
+        
         If Err.Number <> 0 Then
             Err.Clear
             LogSkippedItem logFilePath, mailItem.Subject, "Failed to save as MHT (IRM protected or locked)."
@@ -500,7 +523,7 @@ Sub SaveAsPDFfile()
         End If
 
 1010:   Call InjectFullHeader(doc, mailItem)
-1020:   Call TrimQuotedContent(doc)
+1020:   Call TrimQuotedContent(doc) ' This now serves as a secondary safety net
 1030:   doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF
         
         If Err.Number <> 0 Then
