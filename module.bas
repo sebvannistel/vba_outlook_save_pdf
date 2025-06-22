@@ -700,6 +700,6 @@ ErrorHandler:
 GoTo Cleanup
 End Sub
 '--- Convenience wrapper to match original examples ---------------------------
-Private Sub SaveAsPDF()
+Public Sub SaveAsPDF()
     Call SaveAsPDFfile
 End Sub
