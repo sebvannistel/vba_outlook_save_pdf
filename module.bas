@@ -145,6 +145,59 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error GoTo 0
 End Sub
 
+'------ Helper: Tidy final Word doc and trim quoted text/footers -----------------
+Private Sub TidyAndTrimDocument(wdDoc As Word.Document)
+
+    '------ 2 a  ▸ unify font & size  ---------------------------------------
+    'Attach corporate template *and* wipe direct formatting
+    wdDoc.ApplyDocumentTemplate "C:\Path\Brand.dotx"
+
+    With wdDoc.Content.Font                 ' ← restores uniformity
+        .Name = "Calibri"
+        .Size = 11
+    End With
+    With wdDoc.Styles(wdStyleNormal).Font   ' ← keeps tables/lists consistent
+        .Name = "Calibri"
+        .Size = 11
+    End With
+
+    wdDoc.Styles(wdStyleHeading1).Font.Name = "Calibri Light"
+
+    '------ 2 b  ▸ remove quoted replies / footers  --------------------------
+    Dim rng As Word.Range
+    Set rng = wdDoc.Content
+
+    'Typical separators you said slip through ("From:", huge disclaimers, etc.)
+    Const CUT_MARKS As String = _
+          "-----Original Message-----|From: |Brucher Thieltgen & Partners"
+    Const FOOTER_MARK As String = "Please consider the impact on the environment"
+    Dim parts() As String: parts = Split(CUT_MARKS, "|")
+
+    Dim i As Long, pos As Long
+
+    'first remove known footer blocks without affecting replies
+    pos = InStr(1, rng.Text, FOOTER_MARK, vbTextCompare)
+    If pos > 0 Then
+        wdDoc.Range(rng.Start + pos - 1, wdDoc.Content.End).Delete
+        Set rng = wdDoc.Content
+    End If
+
+    For i = LBound(parts) To UBound(parts)
+        pos = InStr(1, rng.Text, parts(i), vbTextCompare)
+        If pos > 0 Then
+            rng.End = rng.Start + pos - 2        '-2 keeps the line break neat
+            Exit For
+        End If
+    Next i
+    rng.Delete                                       'delete everything after cut mark
+
+    '------ 2 c  ▸ compact extra blank lines left behind  --------------------
+    wdDoc.Range.ParagraphFormat.SpaceAfter = 0
+    wdDoc.Range.Find.Execute FindText:=vbLf & vbLf, _
+                              ReplaceWith:=vbLf, _
+                              Replace:=wdReplaceAll
+End Sub
+
 '--- NEW HELPER (AS PER FIX): Injects a full header with a duplicate guard ---
 Private Sub InjectFullHeader(doc As Object, m As Outlook.MailItem)
     On Error Resume Next ' In case a property is not available
@@ -581,6 +634,7 @@ Sub SaveAsPDFfile()
         '–-–- END NEW –-–-
 
         '— export without carrying IRM over —
+        Call TidyAndTrimDocument(doc)
         doc.ExportAsFixedFormat pdfFile, wdExportFormatPDF, _
                 OpenAfterExport:=False, OptimizeFor:=wdExportOptimizeForPrint, _
                 KeepIRM:=False
@@ -643,5 +697,9 @@ WordCreationFailed:
 ErrorHandler:
     MsgBox "A critical error occurred on line " & Erl & "." & vbCrLf & vbCrLf & _
            "Error " & Err.Number & ": " & Err.Description, vbCritical, "Macro Error"
-    GoTo Cleanup
+GoTo Cleanup
+End Sub
+'--- Convenience wrapper to match original examples ---------------------------
+Sub SaveSelectedMails_AsPDF_NoPopups()
+    Call SaveAsPDFfile
 End Sub
