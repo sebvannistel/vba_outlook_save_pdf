@@ -700,6 +700,6 @@ ErrorHandler:
 GoTo Cleanup
 End Sub
 '--- Convenience wrapper to match original examples ---------------------------
-Sub SaveSelectedMails_AsPDF_NoPopups()
+Sub SaveAsPDF()
     Call SaveAsPDFfile
 End Sub
