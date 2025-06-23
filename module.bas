@@ -145,7 +145,7 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error GoTo 0
 End Sub
 
-'------ Helper: Tidy final Word doc and trim quoted text/footers (UNIVERSAL LATE BINDING - V2) --
+'------ Helper: Tidy final Word doc and trim quoted text/footers (FINAL ROBUST VERSION) --
 Private Sub TidyAndTrimDocument(wdDoc As Object)
     ' --- Define Word constants for late binding ---
     Const wdReplaceAll As Long = 2
@@ -165,7 +165,7 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
     End With
 
     '------ 2. Universally Find and Trim Quoted Replies --------------------------
-    Dim findRange As Object ' Word.Range
+    Dim findRange As Object
     Dim patterns As Variant
     Dim pat As Variant
     Dim firstCutPos As Long
@@ -200,10 +200,10 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
         End With
     Next pat
 
-    ' *** CORRECTED AND SAFER DELETION LOGIC ***
-    ' After checking all patterns, if we found a valid separator, delete from that point.
-    If firstCutPos > 1 Then ' Ensure the position is valid (greater than the first character)
+    ' *** SAFER DELETION LOGIC TO PREVENT ERROR 438 ***
+    If firstCutPos > 1 Then ' Ensure the position is valid
         Dim deleteRange As Object
+        ' Create the range first, then delete it. This is more stable.
         Set deleteRange = wdDoc.Range(Start:=firstCutPos, End:=wdDoc.Content.End)
         deleteRange.Delete
     End If
@@ -213,7 +213,7 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
     With findRange.Find
         .ClearFormatting
         .Replacement.ClearFormatting
-        .Text = "^p^p" ' Use Word's code for paragraph marks
+        .Text = "^p^p" ' Use Word's internal code for paragraph marks, more reliable than vbCr
         .Replacement.Text = "^p"
         .MatchWildcards = False ' Turn off wildcards for this
         .Wrap = 1 ' wdFindContinue
@@ -446,7 +446,7 @@ Public Sub SaveAsPDFfile()
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
 
-    'On Error GoTo ErrorHandler
+    On Error GoTo ErrorHandler
 
     ' Step 1: Get target folder
     tgtFolder = GetTargetFolder_Universal()
