@@ -446,7 +446,7 @@ Public Sub SaveAsPDFfile()
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
 
-    On Error GoTo ErrorHandler
+    'On Error GoTo ErrorHandler
 
     ' Step 1: Get target folder
     tgtFolder = GetTargetFolder_Universal()
