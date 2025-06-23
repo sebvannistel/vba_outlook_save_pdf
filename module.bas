@@ -145,20 +145,16 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error GoTo 0
 End Sub
 
-'------ Helper: Tidy final Word doc and trim quoted text/footers (UNIVERSAL LATE BINDING VERSION) --
+'------ Helper: Tidy final Word doc and trim quoted text/footers (UNIVERSAL LATE BINDING - V2) --
 Private Sub TidyAndTrimDocument(wdDoc As Object)
     ' --- Define Word constants for late binding ---
     Const wdReplaceAll As Long = 2
     Const wdStyleNormal As Long = -1
-    Const wdStyleHeading1 As Long = -2
     Const wdFindStop As Long = 0
 
     On Error Resume Next ' In case of errors during styling
 
-    '------ 1. Apply Basic Formatting (Optional) --------------------------------
-    ' Comment this out if you don't have a corporate template
-    ' wdDoc.ApplyDocumentTemplate "C:\Path\To\Your\Brand.dotx"
-
+    '------ 1. Apply Basic Formatting --------------------------------
     With wdDoc.Content.Font
         .Name = "Calibri"
         .Size = 11
@@ -174,8 +170,6 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
     Dim pat As Variant
     Dim firstCutPos As Long
     
-    ' This array contains universal WILDCARD patterns.
-    ' They are processed in order, but the code finds the EARLIEST match overall.
     patterns = Array( _
         "[-_]{5,}Original Message[-_]{5,}", _
         "From:?*Sent:?*To:?*Subject:?*", _
@@ -185,26 +179,19 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
     
     firstCutPos = -1 ' Initialize to a "not found" state
 
-    ' Loop through each pattern to find the one that appears EARLIEST in the document
     For Each pat In patterns
         Set findRange = wdDoc.Content
         With findRange.Find
             .ClearFormatting
             .Text = pat
             .Forward = True
-            .Wrap = wdFindStop ' IMPORTANT: Do not loop around the document
+            .Wrap = wdFindStop
             .Format = False
             .MatchCase = False
-            .MatchWildcards = True ' THE MAGIC SWITCH!
+            .MatchWildcards = True
             
             If .Execute = True Then
-                ' *** CRITICAL SAFETY CHECK ***
-                ' Do not trim if the match is in the first 400 characters.
-                ' This prevents the macro from matching the *main email's own header*
-                ' and deleting the entire message body.
                 If findRange.Start > 400 Then
-                    ' If this is the first separator found, or if it's earlier
-                    ' than the previous best, record its position.
                     If firstCutPos = -1 Or findRange.Start < firstCutPos Then
                         firstCutPos = findRange.Start
                     End If
@@ -213,24 +200,29 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
         End With
     Next pat
 
+    ' *** CORRECTED AND SAFER DELETION LOGIC ***
     ' After checking all patterns, if we found a valid separator, delete from that point.
-    If firstCutPos > -1 Then
-        wdDoc.Range(Start:=firstCutPos, End:=wdDoc.Content.End).Delete
+    If firstCutPos > 1 Then ' Ensure the position is valid (greater than the first character)
+        Dim deleteRange As Object
+        Set deleteRange = wdDoc.Range(Start:=firstCutPos, End:=wdDoc.Content.End)
+        deleteRange.Delete
     End If
     
     '------ 3. Compact Extra Blank Lines Left Behind --------------------
-    wdDoc.Range.ParagraphFormat.SpaceAfter = 0
-    With wdDoc.Content.Find
+    Set findRange = wdDoc.Content
+    With findRange.Find
         .ClearFormatting
         .Replacement.ClearFormatting
-        .Text = vbCr & vbCr
-        .Replacement.Text = vbCr
-        .MatchWildcards = False ' Turn off wildcards for this simple find/replace
+        .Text = "^p^p" ' Use Word's code for paragraph marks
+        .Replacement.Text = "^p"
+        .MatchWildcards = False ' Turn off wildcards for this
         .Wrap = 1 ' wdFindContinue
         .Execute Replace:=wdReplaceAll
     End With
 
+    ' Clean up objects
     Set findRange = Nothing
+    Set deleteRange = Nothing
     On Error GoTo 0
 End Sub
 
@@ -454,7 +446,7 @@ Public Sub SaveAsPDFfile()
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
 
-    'On Error GoTo ErrorHandler
+    On Error GoTo ErrorHandler
 
     ' Step 1: Get target folder
     tgtFolder = GetTargetFolder_Universal()
