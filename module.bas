@@ -145,82 +145,95 @@ Private Sub InjectSimpleHeader(doc As Object, m As Outlook.MailItem)
     On Error GoTo 0
 End Sub
 
-'------ Helper: Tidy final Word doc and trim quoted text/footers (LATE BINDING VERSION) --
+'------ Helper: Tidy final Word doc and trim quoted text/footers (UNIVERSAL LATE BINDING VERSION) --
 Private Sub TidyAndTrimDocument(wdDoc As Object)
     ' --- Define Word constants for late binding ---
     Const wdReplaceAll As Long = 2
     Const wdStyleNormal As Long = -1
     Const wdStyleHeading1 As Long = -2
+    Const wdFindStop As Long = 0
 
     On Error Resume Next ' In case of errors during styling
 
-    '------ 2 a  ▸ unify font & size  ---------------------------------------
-    'Attach corporate template *and* wipe direct formatting
-    'NOTE: The template path must be valid or this will do nothing.
-    'wdDoc.ApplyDocumentTemplate "C:\Path\Brand.dotx"
+    '------ 1. Apply Basic Formatting (Optional) --------------------------------
+    ' Comment this out if you don't have a corporate template
+    ' wdDoc.ApplyDocumentTemplate "C:\Path\To\Your\Brand.dotx"
 
-    With wdDoc.Content.Font                 ' ← restores uniformity
+    With wdDoc.Content.Font
         .Name = "Calibri"
         .Size = 11
     End With
-    With wdDoc.Styles(wdStyleNormal).Font   ' ← keeps tables/lists consistent
+    With wdDoc.Styles(wdStyleNormal).Font
         .Name = "Calibri"
         .Size = 11
     End With
 
-    wdDoc.Styles(wdStyleHeading1).Font.Name = "Calibri Light"
+    '------ 2. Universally Find and Trim Quoted Replies --------------------------
+    Dim findRange As Object ' Word.Range
+    Dim patterns As Variant
+    Dim pat As Variant
+    Dim firstCutPos As Long
+    
+    ' This array contains universal WILDCARD patterns.
+    ' They are processed in order, but the code finds the EARLIEST match overall.
+    patterns = Array( _
+        "[-_]{5,}Original Message[-_]{5,}", _
+        "From:?*Sent:?*To:?*Subject:?*", _
+        "<blockquote*>", _
+        "<hr*>" _
+    )
+    
+    firstCutPos = -1 ' Initialize to a "not found" state
 
-    '------ 2 b  ▸ remove quoted replies / footers  --------------------------
-    Dim rng As Object ' Word.Range becomes Object
-    Set rng = wdDoc.Content
-
-    'Typical separators to find the start of a reply
-    Const CUT_MARKS As String = _
-          "-----Original Message-----|From: |Brucher Thieltgen & Partners"
-    Const FOOTER_MARK As String = "Please consider the impact on the environment"
-    Dim parts() As String: parts = Split(CUT_MARKS, "|")
-
-    Dim i As Long, pos As Long, firstCutPos As Long
-    firstCutPos = -1 ' Use -1 to indicate "not found"
-
-    ' Find the EARLIEST separator to cut from
-    For i = LBound(parts) To UBound(parts)
-        ' Search for the separator, but NOT in the first 400 characters
-        ' to avoid matching the main email's "From:" line.
-        pos = InStr(400, rng.Text, parts(i), vbTextCompare)
-        If pos > 0 Then
-            If firstCutPos = -1 Or pos < firstCutPos Then
-                firstCutPos = pos
+    ' Loop through each pattern to find the one that appears EARLIEST in the document
+    For Each pat In patterns
+        Set findRange = wdDoc.Content
+        With findRange.Find
+            .ClearFormatting
+            .Text = pat
+            .Forward = True
+            .Wrap = wdFindStop ' IMPORTANT: Do not loop around the document
+            .Format = False
+            .MatchCase = False
+            .MatchWildcards = True ' THE MAGIC SWITCH!
+            
+            If .Execute = True Then
+                ' *** CRITICAL SAFETY CHECK ***
+                ' Do not trim if the match is in the first 400 characters.
+                ' This prevents the macro from matching the *main email's own header*
+                ' and deleting the entire message body.
+                If findRange.Start > 400 Then
+                    ' If this is the first separator found, or if it's earlier
+                    ' than the previous best, record its position.
+                    If firstCutPos = -1 Or findRange.Start < firstCutPos Then
+                        firstCutPos = findRange.Start
+                    End If
+                End If
             End If
-        End If
-    Next i
+        End With
+    Next pat
 
-    ' If a separator was found, delete everything from that point on.
+    ' After checking all patterns, if we found a valid separator, delete from that point.
     If firstCutPos > -1 Then
-        wdDoc.Range(Start:=firstCutPos - 1, End:=wdDoc.Content.End).Delete
-        Set rng = wdDoc.Content ' Re-set the range after deletion
+        wdDoc.Range(Start:=firstCutPos, End:=wdDoc.Content.End).Delete
     End If
-
-    ' Now, separately check for and remove the legal footer
-    pos = InStr(1, rng.Text, FOOTER_MARK, vbTextCompare)
-    If pos > 0 Then
-        wdDoc.Range(Start:=pos - 1, End:=wdDoc.Content.End).Delete
-    End If
-
-    '------ 2 c  ▸ compact extra blank lines left behind  --------------------
+    
+    '------ 3. Compact Extra Blank Lines Left Behind --------------------
     wdDoc.Range.ParagraphFormat.SpaceAfter = 0
     With wdDoc.Content.Find
         .ClearFormatting
         .Replacement.ClearFormatting
-        .Text = vbCr & vbCr ' Find two consecutive paragraph marks
-        .Replacement.Text = vbCr ' Replace with one
-        .Forward = True
+        .Text = vbCr & vbCr
+        .Replacement.Text = vbCr
+        .MatchWildcards = False ' Turn off wildcards for this simple find/replace
         .Wrap = 1 ' wdFindContinue
         .Execute Replace:=wdReplaceAll
     End With
 
+    Set findRange = Nothing
     On Error GoTo 0
 End Sub
+
 
 '--- NEW HELPER (AS PER FIX): Injects a full header with a duplicate guard ---
 Private Sub InjectFullHeader(doc As Object, m As Outlook.MailItem)
