@@ -157,7 +157,7 @@ Private Sub TidyAndTrimDocument(wdDoc As Object)
     '------ 2 a  ▸ unify font & size  ---------------------------------------
     'Attach corporate template *and* wipe direct formatting
     'NOTE: The template path must be valid or this will do nothing.
-    wdDoc.ApplyDocumentTemplate "C:\Path\Brand.dotx"
+    'wdDoc.ApplyDocumentTemplate "C:\Path\Brand.dotx"
 
     With wdDoc.Content.Font                 ' ← restores uniformity
         .Name = "Calibri"
