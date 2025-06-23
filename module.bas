@@ -406,7 +406,7 @@ End Sub
 ' =========================================================================================
 ' === FINAL, ROBUST MAIN PROCEDURE (WITH ALL SAFETY CHECKS)                             ===
 ' =========================================================================================
-Private SaveAsPDFfile()
+Private Sub SaveAsPDFfile()
     ' --- SETUP ---
     Const MAX_PATH As Long = 259
 
