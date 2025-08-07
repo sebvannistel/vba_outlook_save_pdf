@@ -121,3 +121,14 @@ pytest -q
 ```
 
 Executing the tests prior to committing helps maintain the project's stability.
+
+### Manual Inspector Scenario
+
+If you run the macro with no Explorer window open, it now falls back to the item
+displayed in an active Inspector window. To verify this manually:
+
+1. Close all Outlook Explorer windows so no folder view is active.
+2. Double-click an email to open it in its own window (Inspector).
+3. Trigger `SaveAsPDFfile` from the Ribbon or macro list.
+4. Choose a destination folder and confirm that a PDF of the opened email is
+   created there without any "No Active Window" warning.

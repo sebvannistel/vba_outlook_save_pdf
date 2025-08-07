@@ -446,6 +446,7 @@ Public Sub SaveAsPDFfile()
     Dim att As Outlook.Attachment
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
+    Dim itm As Object
 
     On Error GoTo ErrorHandler
 
@@ -453,14 +454,26 @@ Public Sub SaveAsPDFfile()
     tgtFolder = GetTargetFolder_Universal()
     If Len(tgtFolder) = 0 Then Exit Sub
 
-    ' Step 2: Get and de-duplicate selections
+    ' Step 2: Gather selected items, falling back to the active Inspector if needed
+    Dim selectedItems As Collection
+    Set selectedItems = New Collection
+
     If Application.ActiveExplorer Is Nothing Then
-        MsgBox "Cannot run macro. Please select emails in the main Outlook window.", vbExclamation, "No Active Window"
-        GoTo Cleanup
+        ' No Explorer window; use the item from the active Inspector if available
+        If Not Application.ActiveInspector Is Nothing Then
+            selectedItems.Add Application.ActiveInspector.CurrentItem
+        Else
+            MsgBox "Cannot run macro. Please select or open an email in Outlook.", vbExclamation, "No Active Window"
+            GoTo Cleanup
+        End If
+    Else
+        Set sel = Application.ActiveExplorer.Selection
+        For Each itm In sel
+            selectedItems.Add itm
+        Next itm
     End If
 
-    Set sel = Application.ActiveExplorer.Selection
-    If sel.Count = 0 Then
+    If selectedItems.Count = 0 Then
         MsgBox "Please select one or more emails to save.", vbInformation, "No Items Selected"
         GoTo Cleanup
     End If
@@ -470,11 +483,11 @@ Public Sub SaveAsPDFfile()
         MsgBox "Could not create Scripting.Dictionary.", vbCritical
         Exit Sub
     End If
-    Dim k As String, it As Object
-    For Each it In sel
-        k = it.EntryID
-        If Not latest.Exists(k) Then latest.Add k, it
-    Next it
+    Dim k As String
+    For Each itm In selectedItems
+        k = itm.EntryID
+        If Not latest.Exists(k) Then latest.Add k, itm
+    Next itm
     total = latest.Count
     If total = 0 Then
         MsgBox "No unique items to process.", vbInformation
