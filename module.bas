@@ -443,6 +443,7 @@ Public Sub SaveAsPDFfile()
     Dim sel As Outlook.Selection
     Dim wrd As Object, doc As Object, fso As Object
     Dim mailItem As Outlook.MailItem
+    Dim att As Outlook.Attachment
     Dim tgtFolder As String, logFilePath As String
     Dim done As Long, skipped As Long, total As Long
 
@@ -582,6 +583,25 @@ Public Sub SaveAsPDFfile()
             Err.Clear
         Else
             done = done + 1
+
+            ' --- SAVE ATTACHMENTS ---
+            Dim attFile As String, attBase As String, attExt As String
+            Dim attDup As Long
+            For Each att In mailItem.Attachments
+                attBase = CleanFile(att.FileName)
+                attExt = ""
+                If InStrRev(attBase, ".") > 0 Then
+                    attExt = Mid$(attBase, InStrRev(attBase, "."))
+                    attBase = Left$(attBase, InStrRev(attBase, ".") - 1)
+                End If
+                attFile = tgtFolder & baseName & "_" & attBase & attExt
+                attDup = 1
+                Do While fso.FileExists(attFile)
+                    attFile = tgtFolder & baseName & "_" & attBase & "_" & attDup & attExt
+                    attDup = attDup + 1
+                Loop
+                att.SaveAsFile attFile
+            Next att
         End If
 
 NextItem:
