@@ -53,8 +53,8 @@ Make sure Outlook actually loads the macros. By default Outlook disables them fo
 
 1. **Select the Emails**: Choose one or multiple emails you wish to save as PDFs.
 2. **Activate the Macro**: Click on the `SaveAsPDFfile` button (or use `SaveSelectedMails_AsPDF_NoPopups` for silent exports) on your custom ribbon.
-3. **Specify Save Location**: Follow the prompts to select a destination folder for the PDFs.
-4. **Completion**: Sit back and watch as your selected emails are transformed and saved as PDFs on your disk.
+3. **Specify Save Location**: Follow the prompts to select a destination folder for the PDFs and any attachments.
+4. **Completion**: Sit back and watch as your selected emails are transformed and saved as PDFs on your disk, with their attachments saved alongside them.
 
 ![Demonstration](images/demo.gif)
 
