@@ -55,6 +55,7 @@ Make sure Outlook actually loads the macros. By default Outlook disables them fo
 2. **Activate the Macro**: Click on the `SaveAsPDFfile` button (or use `SaveSelectedMails_AsPDF_NoPopups` for silent exports) on your custom ribbon.
 3. **Specify Save Location**: Follow the prompts to select a destination folder for the PDFs and any attachments.
 4. **Completion**: Sit back and watch as your selected emails are transformed and saved as PDFs on your disk, with their attachments saved alongside them.
+5. **Review skipped items**: If any emails couldn't be saved, a log file named `skipped_YYYYMMDD_HHMMSS.log` will appear in the chosen folder describing each skipped message.
 
 ![Demonstration](images/demo.gif)
 
@@ -72,6 +73,15 @@ subject prefix) to detect them:
 6. **Voting-button responses** – the reply subject begins with the chosen option
 7. **Task delegation & updates** – `IPM.TaskRequest.*`
 8. **Encrypted S/MIME reports** – `REPORT.IPM.NOTE.SMIME.*`
+
+## Skipped message log
+
+When the macro skips a message, it records the subject and reason in a timestamped log file placed in the target folder. The log filename uses the pattern `skipped_YYYYMMDD_HHMMSS.log`.
+
+```
+skipped_20240420_153045.log
+2024-04-20 15:30:45 - Skipped "Quarterly Report" (unsupported format)
+```
 
 
 ## ⚠️ Troubleshooting: Resolving Blank PDFs and Freezes
