@@ -12,11 +12,11 @@ Imagine effortlessly saving one or multiple emails from your Outlook inbox direc
 
 ## Contents
 
-- [Installation Guide](#"How-to-add-to-Outlook")
+- [Installation Guide](#installation-guide)
 - [Enable Macros in Outlook](#enable-macros-in-outlook)
 - [How to Use](#usage)
 - [License Information](#license)
-- [Access the Code Directly!](https://raw.githubusercontent.com/cavo789/vba_outlook_save_pdf/master/module.bas)
+- [Access the Code Directly!](./module.bas)
 
 ## Installation Guide
 
@@ -25,7 +25,7 @@ Transform your Outlook into a powerful email-to-PDF converter in a few simple st
 1. **Integrating the VBA Code**:
    - Activate the Visual Basic Editor in Outlook by pressing `ALT-F11`.
    - Navigate to Menu Bar -> Insert, then choose "Module" to create a new module.
-   - Obtain the `module.bas` script from [here](https://raw.githubusercontent.com/cavo789/vba_outlook_save_pdf/master/module.bas) and paste it into the newly created module.
+   - Obtain the `module.bas` script from [here](./module.bas) and paste it into the newly created module.
    - Exit the Visual Basic Editor.
 
 2. **Adding a Custom Button to the Ribbon**:
