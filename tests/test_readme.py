@@ -7,3 +7,7 @@ def test_readme_mentions_enhanced_guide():
 
 def test_readme_has_installation_section():
     assert '## Installation Guide' in README
+
+
+def test_readme_describes_inspector_scenario():
+    assert 'Manual Inspector Scenario' in README
