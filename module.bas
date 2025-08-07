@@ -632,3 +632,12 @@ End Sub
 Public Sub SaveAsPDF()
     Call SaveAsPDFfile
 End Sub
+
+'--- Background-only wrapper that avoids user-facing popups ---------
+Public Sub SaveSelectedMails_AsPDF_NoPopups()
+    ' Executes the PDF export in silent mode. Any runtime
+    ' errors are ignored and no interactive message boxes are shown.
+    On Error Resume Next
+    SaveAsPDFfile
+    On Error GoTo 0
+End Sub
