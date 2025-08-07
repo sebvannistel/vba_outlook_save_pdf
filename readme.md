@@ -111,3 +111,13 @@ After applying these settings, the macro should now be able to run without inter
 ## License
 
 This tool is freely distributed under the [MIT License](LICENSE), promoting open and unrestricted use while encouraging contributions and modifications.
+
+## Testing
+
+Run the test suite before committing any changes to ensure everything works as expected:
+
+```bash
+pytest -q
+```
+
+Executing the tests prior to committing helps maintain the project's stability.
